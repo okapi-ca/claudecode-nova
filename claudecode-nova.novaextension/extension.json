@@ -1,0 +1,130 @@
+{
+  "identifier": "com.marcbourget.claudecode-nova",
+  "name": "Claude Code Bridge",
+  "organization": "Marc Bourget",
+  "description": "Integrates Claude Code CLI with Nova via the WebSocket MCP protocol, providing context sharing, diff viewing, and selection tracking.",
+  "version": "0.1.0",
+  "categories": ["commands", "sidebars"],
+  "license": "MIT",
+  "repository": "",
+  "bugs": "",
+  "min_runtime": "10.0",
+
+  "main": "main.js",
+
+  "entitlements": {
+    "process": true,
+    "filesystem": "readwrite",
+    "requests": true
+  },
+
+  "activationEvents": [
+    "onLanguage:*",
+    "onCommand:claudecode.start",
+    "onCommand:claudecode.stop",
+    "onCommand:claudecode.sendSelection",
+    "onCommand:claudecode.addFile"
+  ],
+
+  "commands": {
+    "editor": [
+      {
+        "title": "Send Selection to Claude",
+        "command": "claudecode.sendSelection",
+        "when": "editorHasSelection"
+      }
+    ],
+    "extensions": [
+      {
+        "title": "Start Claude Code Bridge",
+        "command": "claudecode.start"
+      },
+      {
+        "title": "Stop Claude Code Bridge",
+        "command": "claudecode.stop"
+      },
+      {
+        "title": "Add Current File to Claude",
+        "command": "claudecode.addFile"
+      },
+      {
+        "title": "Show Claude Code Status",
+        "command": "claudecode.status"
+      }
+    ]
+  },
+
+  "sidebars": [
+    {
+      "id": "claudecode.sidebar",
+      "name": "Claude Code",
+      "smallImage": "claude-icon-small",
+      "largeImage": "claude-icon-large",
+      "sections": [
+        {
+          "id": "claudecode.sidebar.status",
+          "name": "Status",
+          "placeholderText": "Claude Code is not connected.",
+          "headerCommands": [
+            {
+              "title": "Start",
+              "image": "__builtin.play",
+              "command": "claudecode.start",
+              "tooltip": "Start Claude Code Bridge"
+            },
+            {
+              "title": "Stop",
+              "image": "__builtin.stop",
+              "command": "claudecode.stop",
+              "tooltip": "Stop Claude Code Bridge"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+
+  "config": [
+    {
+      "key": "claudecode.portMin",
+      "title": "Port Range (Min)",
+      "type": "number",
+      "default": 10000
+    },
+    {
+      "key": "claudecode.portMax",
+      "title": "Port Range (Max)",
+      "type": "number",
+      "default": 65535
+    },
+    {
+      "key": "claudecode.autoStart",
+      "title": "Auto-start on activation",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "claudecode.trackSelection",
+      "title": "Track editor selection",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "claudecode.nodePath",
+      "title": "Path to Node.js",
+      "type": "string",
+      "default": "node",
+      "description": "Path to the node executable used for the WebSocket server helper."
+    }
+  ],
+
+  "configWorkspace": [
+    {
+      "key": "claudecode.claudeCommand",
+      "title": "Claude CLI command",
+      "type": "string",
+      "default": "claude",
+      "description": "Command to launch Claude Code CLI."
+    }
+  ]
+}
