@@ -7,10 +7,12 @@
   "categories": ["commands", "sidebars"],
   "license": "MIT",
   "repository": "",
-  "bugs": "",
+  "bugs": "https://github.com/okapi-ca/claudecode-nova/issues",
   "min_runtime": "10.0",
 
   "main": "main.js",
+
+  "activationEvents": ["*"],
 
   "entitlements": {
     "process": true,
@@ -18,13 +20,6 @@
     "requests": true
   },
 
-  "activationEvents": [
-    "onLanguage:*",
-    "onCommand:claudecode.start",
-    "onCommand:claudecode.stop",
-    "onCommand:claudecode.sendSelection",
-    "onCommand:claudecode.addFile"
-  ],
 
   "commands": {
     "editor": [
@@ -50,6 +45,10 @@
       {
         "title": "Show Claude Code Status",
         "command": "claudecode.status"
+      },
+      {
+        "title": "Launch Claude Code (with IDE integration)",
+        "command": "claudecode.launchClaude"
       }
     ]
   },

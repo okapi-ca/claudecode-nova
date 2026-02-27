@@ -31,14 +31,7 @@ const IDE_NAME  = "Nova";
 // Utilities
 // ---------------------------------------------------------------------------
 function generateAuthToken() {
-  return [
-    crypto.randomBytes(4).toString("hex"),
-    crypto.randomBytes(2).toString("hex"),
-    "4" + crypto.randomBytes(2).toString("hex").slice(1),
-    ((parseInt(crypto.randomBytes(1).toString("hex"), 16) & 0x3f) | 0x80).toString(16) +
-      crypto.randomBytes(2).toString("hex").slice(1),
-    crypto.randomBytes(6).toString("hex"),
-  ].join("-");
+  return crypto.randomUUID();
 }
 
 function log(level, msg, data) {
@@ -64,13 +57,11 @@ function writeLockFile(port, authToken) {
   fs.mkdirSync(dir, { recursive: true });
   const lockPath = path.join(dir, `${port}.lock`);
   const lockData = {
-    port,
-    authToken,
-    version: "0.2.0",
-    ideName: IDE_NAME,
-    ideVersion: "1.0.0",
-    workspaceFolders: [WORKSPACE],
     pid: process.pid,
+    workspaceFolders: [WORKSPACE],
+    ideName: IDE_NAME,
+    transport: "ws",
+    authToken,
   };
   fs.writeFileSync(lockPath, JSON.stringify(lockData, null, 2));
   log("info", `Lock file written: ${lockPath}`);
