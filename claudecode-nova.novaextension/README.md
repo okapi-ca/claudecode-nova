@@ -47,9 +47,10 @@ The extension spawns a Node.js subprocess that runs a WebSocket server implement
 
 - **Automatic context sharing** — Claude Code sees your active file, selection, and workspace structure
 - **Selection tracking** — Real-time selection broadcasts as you navigate and select code
-- **Diff review** — Accept or reject Claude's proposed changes via notification prompts
+- **Diff review** — Accept or reject Claude's proposed changes via notification prompts; user edits in the proposed-changes tab are preserved on Accept and signalled back to Claude
 - **File operations** — Claude can open files, save documents, and check for unsaved changes
-- **Sidebar status** — See connection state at a glance
+- **Sidebar tracking** — Three live sections: connection status, pending diffs queue with per-item Accept/Reject, and an activity log of file operations and diff outcomes (auto-refreshes every 30s)
+- **One-click launch** — Open Claude Code in iTerm or Terminal.app with the IDE-bridge env vars pre-set; the bridge connects automatically
 - **Secure by default** — Localhost-only WebSocket with UUID token authentication
 
 ## Requirements
@@ -84,18 +85,21 @@ Then enable Extension Development in Nova: **Preferences → General → Extensi
 
 1. Open a project in Nova
 2. The extension starts automatically (you'll see a notification)
-3. Open a terminal (inside Nova or externally) and navigate to your project:
-   ```bash
-   cd /your/project
-   claude
-   ```
-4. Inside Claude Code, type:
-   ```
-   /ide
-   ```
-5. Claude Code discovers Nova and connects ✓
+3. Run the **Launch Claude Code** command from *Extensions → Claude Code Bridge* (or the Command Palette).
+   - It opens Claude in your configured terminal (iTerm by default if installed, otherwise Terminal.app — see the `claudecode.terminalApp` setting) with the workspace cwd and IDE-bridge env vars already set.
+   - The bridge connects automatically; no need to type `/ide`.
+4. You'll see a "Connected" notification in Nova. Claude now has access to your editor context.
 
-You should see a "Connected" notification in Nova. Claude now has access to your editor context.
+### Manual launch (alternative)
+
+If you prefer to drive the terminal yourself, set `claudecode.terminalApp` to `clipboard` and run:
+
+```bash
+cd /your/project
+CLAUDE_CODE_SSE_PORT=<port> ENABLE_IDE_INTEGRATION=true claude
+```
+
+The port is shown in the *Show Claude Code Status* command. Inside Claude, `/ide` triggers discovery if the env vars weren't picked up.
 
 ## Supported MCP Tools
 
@@ -104,7 +108,7 @@ These are the tools that Claude Code can invoke through the bridge, matching the
 | Tool | Status | Description |
 |------|--------|-------------|
 | `openFile` | ✅ Full | Open a file with optional line navigation |
-| `openDiff` | ✅ Basic | Diff via temp file + accept/reject notification |
+| `openDiff` | ✅ Full | Diff via temp file + accept/reject notification. User edits in the proposed-changes tab are preserved on Accept and signalled back to Claude (see [Known Limitations §1](#known-limitations) for the side-by-side caveat). |
 | `getCurrentSelection` | ✅ Full | Current editor selection with file path and range |
 | `getLatestSelection` | ✅ Full | Most recently recorded selection |
 | `getOpenEditors` | ✅ Full | List all open editor tabs with metadata |
@@ -112,7 +116,9 @@ These are the tools that Claude Code can invoke through the bridge, matching the
 | `checkDocumentDirty` | ✅ Full | Check for unsaved changes in a file |
 | `saveDocument` | ✅ Full | Save a document |
 | `getDiagnostics` | ⚠️ Partial | Requires LSP extension cooperation (see Limitations) |
-| `closeAllDiffTabs` | ✅ Full | Clean up temporary diff files |
+| `closeAllDiffTabs` | ⚠️ Best-effort | Removes our temporary `proposed_*` files; cannot close Nova editor tabs because Nova has no public tab-management API |
+| `close_tab` | ❌ Not supported | Nova exposes no public API to close an editor tab — see [Known Limitations §6](#known-limitations). Not advertised in `tools/list`. |
+| `executeCode` | ❌ Not supported | Nova has no Jupyter kernel integration. Not advertised in `tools/list`. |
 
 ## Direct Tool Invocation (debug helper)
 
@@ -132,6 +138,37 @@ node "$SCRIPT" saveDocument '{"filePath":"/abs/path"}'
 
 The script auto-discovers the lock file under `~/.claude/ide/`, preferring one whose `workspaceFolders` matches the current cwd when several Nova instances are running. Output is the unwrapped tool result as pretty-printed JSON; errors go to stderr with a non-zero exit code.
 
+## Sidebar
+
+The Claude Code sidebar exposes three sections:
+
+```
+▼ Claude Code
+  ▼ Status
+    ● Server Running
+    Port: 12345
+    Clients: 1
+  ▼ Pending Diffs
+    ▼ auth.ts                                      5s ago
+      ✓  Accept
+      ✗  Reject
+    ▼ Button.tsx                                   1m ago
+      ✓  Accept
+      ✗  Reject
+  ▼ Activity
+    📄  Opened src/parser.ts                       just now
+    💾  Saved README.md                            12s ago
+    ✓  Accepted diff: components/Button.tsx       1m ago
+    ✂️  Sent selection from src/types.ts           2m ago
+    ✗  Rejected diff: middleware/cors.ts          5m ago
+    ▶ Tool Calls (47)
+```
+
+- **Status** — connection state, port, client count. Header buttons start/stop the bridge.
+- **Pending Diffs** — every diff Claude proposes is queued here with file name + age. Double-click *Accept* or *Reject* to resolve. Notifications still appear for the first diff (so it gets your attention); the sidebar handles multi-diff overflow. Double-click the parent item to see details with Open / Accept / Reject buttons.
+- **Activity** — visible-effect events (file opens/saves, selections sent, diff outcomes). Click an item to open the corresponding file (file ops) or see a details dialog (diff ops). The collapsible *Tool Calls* group at the bottom shows the raw MCP traffic for debugging — including the bookkeeping calls Claude makes constantly (`getCurrentSelection`, `getOpenEditors`, …).
+- Buffers are bounded (50 activity events, 100 tool calls). Header *Refresh* re-renders, *Clear* empties both buffers. Auto-refresh every 30 s keeps relative timestamps accurate.
+
 ## Commands
 
 Access these from **Extensions → Claude Code Bridge** or the Command Palette:
@@ -143,6 +180,7 @@ Access these from **Extensions → Claude Code Bridge** or the Command Palette:
 | Send Selection to Claude | Push the current selection as context |
 | Add Current File to Claude | Send the entire active file as context |
 | Show Claude Code Status | Display connection status and server info |
+| Launch Claude Code (with IDE integration) | Open Claude Code in your terminal of choice (iTerm or Terminal) with the IDE bridge env vars pre-set. Falls back to clipboard for unsupported terminals — see `claudecode.terminalApp` setting. |
 
 ## Configuration
 
@@ -155,6 +193,7 @@ Access these from **Extensions → Claude Code Bridge** or the Command Palette:
 | `claudecode.autoStart` | `true` | Start the bridge automatically on activation |
 | `claudecode.trackSelection` | `true` | Broadcast selection changes in real time |
 | `claudecode.nodePath` | `node` | Path to the Node.js executable |
+| `claudecode.terminalApp` | `auto` | Where the *Launch Claude Code* command opens the CLI: `auto` (iTerm if installed, else Terminal), `iTerm`, `Terminal`, or `clipboard` (just copy the command). Other terminals (Warp, Ghostty, Hyper) fall back to clipboard automatically. |
 
 ### Per-Project Settings
 
@@ -164,9 +203,9 @@ Access these from **Extensions → Claude Code Bridge** or the Command Palette:
 
 ## Known Limitations
 
-This is a v0.1.0 MVP. The following limitations exist due to Nova's extension API boundaries:
+The following limitations exist due to Nova's extension API boundaries:
 
-1. **Diff viewer** — Nova does not expose a native diff API like VS Code's `vscode.diff`. Proposed changes are shown by opening a temporary file alongside the original, with an accept/reject notification. A future version may leverage Nova's built-in Git comparison view.
+1. **Diff viewer** — Nova does not expose a native diff API like VS Code's `vscode.diff`. Proposed changes are shown by opening a temporary file alongside the original, with an accept/reject notification. Edits the user makes in the proposed-changes tab before clicking *Accept* are preserved (the actual content of the temp file is what gets saved) and signalled back to Claude via `userEdited: true` in the response. A future version may leverage Nova's built-in Git comparison view for side-by-side rendering.
 
 2. **Diagnostics** — Nova does not provide a global API for reading LSP diagnostics from third-party extensions. The `getDiagnostics` tool currently returns an empty list. Full support would require cooperation with language server extensions or a shared `IssueCollection`.
 
@@ -175,6 +214,13 @@ This is a v0.1.0 MVP. The following limitations exist due to Nova's extension AP
 4. **No HTTP preview integration** — Nova's built-in web preview is not accessible through the extension API, so Claude cannot interact with the preview pane.
 
 5. **Selection line numbers** — Nova's `Range` is character-offset based. Line number mapping in selection tracking is approximate. A future version will use `TextDocument` line-counting methods for precise ranges.
+
+6. **No tab-management API** — Nova exposes no method on `TextEditor` or `Workspace` to close an editor tab from an extension. As a consequence:
+   - `close_tab` (tool 11 in [claudecode.nvim PROTOCOL.md](https://github.com/coder/claudecode.nvim/blob/main/PROTOCOL.md)) is **not advertised** in our `tools/list` — Claude will not call it.
+   - `closeAllDiffTabs` only removes the temporary `proposed_*` files staged in extension storage; the corresponding tabs in Nova remain open until the user closes them manually (Cmd+W).
+   - Confirmed by the [Tabs Sidebar extension](https://extensions.panic.com/extensions/austenblokker/austenblokker.TabsSidebar/), which documents the same limitation.
+
+7. **No Jupyter kernel integration** — `executeCode` (tool 12 in PROTOCOL.md) is unsupported. Nova does not expose a notebook runtime, and exposing one would be a separate product. Not advertised in `tools/list`.
 
 ## Architecture
 
@@ -227,14 +273,16 @@ claudecode-nova.novaextension/
 
 ## Roadmap
 
-### v0.2.0
+### v0.2.0 (shipped)
+- [x] One-click launch into iTerm or Terminal.app with IDE env vars pre-set
+- [x] User edits in the proposed-changes tab are preserved on Accept and signalled to Claude (`userEdited` / `finalContent`)
+- [x] Sidebar with Pending Diffs queue (per-item Accept/Reject) and Activity log (visible-effect events + raw tool-call group)
 - [ ] Improved diff view with side-by-side file comparison
 - [ ] Diagnostics integration via shared IssueCollection
-- [ ] Enriched sidebar with Claude action history
 - [ ] Accurate line number tracking in selections
 
 ### v0.3.0
-- [ ] Launch Claude Code from within Nova (integrated terminal)
+- [ ] Warp / Ghostty / Hyper launch support (URL-scheme or wrapper-script approach)
 - [ ] Configurable keyboard shortcuts
 - [ ] Multi-workspace support
 - [ ] File watcher for external changes

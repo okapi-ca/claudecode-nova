@@ -3,7 +3,7 @@
   "name": "Claude Code Bridge",
   "organization": "Marc Bourget",
   "description": "Integrates Claude Code CLI with Nova via the WebSocket MCP protocol, providing context sharing, diff viewing, and selection tracking.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "categories": ["commands", "sidebars"],
   "license": "MIT",
   "repository": "",
@@ -78,6 +78,38 @@
               "tooltip": "Stop Claude Code Bridge"
             }
           ]
+        },
+        {
+          "id": "claudecode.sidebar.diffs",
+          "name": "Pending Diffs",
+          "placeholderText": "No diffs awaiting review.",
+          "headerCommands": [
+            {
+              "title": "Refresh",
+              "image": "__builtin.refresh",
+              "command": "claudecode.sidebarRefresh",
+              "tooltip": "Refresh sidebar"
+            }
+          ]
+        },
+        {
+          "id": "claudecode.sidebar.activity",
+          "name": "Activity",
+          "placeholderText": "No activity yet.",
+          "headerCommands": [
+            {
+              "title": "Refresh",
+              "image": "__builtin.refresh",
+              "command": "claudecode.sidebarRefresh",
+              "tooltip": "Refresh sidebar"
+            },
+            {
+              "title": "Clear",
+              "image": "__builtin.remove",
+              "command": "claudecode.activityClear",
+              "tooltip": "Clear activity log"
+            }
+          ]
         }
       ]
     }
@@ -114,6 +146,19 @@
       "type": "string",
       "default": "node",
       "description": "Path to the node executable used for the WebSocket server helper."
+    },
+    {
+      "key": "claudecode.terminalApp",
+      "title": "Terminal Application",
+      "type": "enum",
+      "values": [
+        ["auto", "Auto-detect (iTerm if installed, otherwise Terminal)"],
+        ["iTerm", "iTerm2"],
+        ["Terminal", "Terminal.app"],
+        ["clipboard", "Just copy the command to clipboard"]
+      ],
+      "default": "auto",
+      "description": "Where the \"Launch Claude Code\" command opens the CLI. Other terminals (Warp, Ghostty, Hyper) fall back to clipboard — choose \"clipboard\" explicitly to keep the v0.1.x behaviour."
     }
   ],
 
