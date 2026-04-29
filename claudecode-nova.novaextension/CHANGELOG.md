@@ -36,6 +36,31 @@
   - `iTerm` — iTerm2, opens a new tab in the current window
   - `Terminal` — Terminal.app, opens a new window
   - `clipboard` — keep the v0.1.x copy-to-clipboard behaviour
+- **`Scripts/call-bridge.js`** — standalone CLI client for debugging
+  and scripting. The Claude Code CLI only forwards
+  `mcp__ide__getDiagnostics` to the model side; the other 9 tools
+  registered by `ws-server.js` are consumed internally by the CLI
+  and unreachable from a model conversation. This script connects
+  to the running bridge directly via the lock file and invokes any
+  tool by name. No npm dependencies — manual WebSocket framing
+  mirrors `ws-server.js`. See README §Direct Tool Invocation.
+
+### Fixed
+- **RFC 6455 handshake** — the `Sec-WebSocket-Accept` calculation
+  used a transposed magic GUID (`…-5AB5DC11CE56` instead of
+  `…-C5AB0DC85B11`), so any RFC-compliant client computed a
+  different digest and closed the connection right after the 101.
+  Symptom: `read ECONNRESET` ~5 ms after "Claude Code client
+  connected" in the Nova extension console with Claude CLI v2.1.x
+  (which uses the `ws` Node.js library). Without this fix the
+  bridge was effectively unusable on recent Claude CLI builds.
+- **WebSocket subprotocol echo** — `ws-server.js` now echoes back
+  the first offered `Sec-WebSocket-Protocol` (Claude CLI sends
+  `mcp`). Strict clients reject the connection if a requested
+  subprotocol is not selected by the server.
+- **Disconnect logging** — the close-event `hadError` flag is now
+  surfaced in the extension console so future handshake regressions
+  are visible at a glance.
 
 ### Changed
 - `openDiff` was refactored: pendingDiffs is now the source of truth.
