@@ -114,6 +114,24 @@ These are the tools that Claude Code can invoke through the bridge, matching the
 | `getDiagnostics` | ⚠️ Partial | Requires LSP extension cooperation (see Limitations) |
 | `closeAllDiffTabs` | ✅ Full | Clean up temporary diff files |
 
+## Direct Tool Invocation (debug helper)
+
+The Claude Code CLI only forwards `mcp__ide__getDiagnostics` to the model — the other 9 tools registered by `ws-server.js` are consumed internally by the CLI and not callable from a model conversation. For debugging or scripting, `Scripts/call-bridge.js` connects to the running bridge directly via the lock file and invokes any tool by name. No npm dependencies.
+
+```bash
+SCRIPT="$HOME/Library/Application Support/Nova/Extensions/com.marcbourget.claudecode-nova/Scripts/call-bridge.js"
+# (or wherever the extension is installed; for development use the project path)
+
+node "$SCRIPT" --tools                         # list tools advertised by the bridge
+node "$SCRIPT" getOpenEditors                  # call with empty args
+node "$SCRIPT" getCurrentSelection
+node "$SCRIPT" getWorkspaceFolders
+node "$SCRIPT" openFile '{"filePath":"/abs/path","lineNumber":42}'
+node "$SCRIPT" saveDocument '{"filePath":"/abs/path"}'
+```
+
+The script auto-discovers the lock file under `~/.claude/ide/`, preferring one whose `workspaceFolders` matches the current cwd when several Nova instances are running. Output is the unwrapped tool result as pretty-printed JSON; errors go to stderr with a non-zero exit code.
+
 ## Commands
 
 Access these from **Extensions → Claude Code Bridge** or the Command Palette:
@@ -165,7 +183,8 @@ claudecode-nova.novaextension/
 ├── extension.json          # Extension manifest (commands, sidebar, config)
 ├── Scripts/
 │   ├── main.js             # Nova entry point — editor API bridge
-│   └── ws-server.js        # WebSocket MCP server (Node.js subprocess)
+│   ├── ws-server.js        # WebSocket MCP server (Node.js subprocess)
+│   └── call-bridge.js      # Standalone CLI client for invoking bridge tools
 ├── Images/
 │   ├── claude-icon-small.png
 │   ├── claude-icon-large.png
