@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Static checks + handshake regression test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: JavaScript syntax check
+        run: |
+          node --check claudecode-nova.novaextension/main.js
+          node --check claudecode-nova.novaextension/Scripts/ws-server.js
+          node --check claudecode-nova.novaextension/Scripts/call-bridge.js
+
+      - name: Validate extension.json + version consistency
+        run: node tests/validate-manifest.js
+
+      - name: WebSocket handshake regression test
+        run: node tests/handshake.test.js
