@@ -237,7 +237,7 @@ registerTool("getDiagnostics", {
 
 registerTool("closeAllDiffTabs", {
   type: "object", properties: {},
-}, "Close all open diff views");
+}, "Clean up temporary diff files staged for review (Nova does not expose a tab-close API; this removes the proposed_* files in extension storage)");
 
 // ---------------------------------------------------------------------------
 // MCP message handling
@@ -284,7 +284,7 @@ function handleRequest(client, msg) {
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "nova-claudecode-bridge", version: "0.1.0" },
+        serverInfo: { name: "nova-claudecode-bridge", version: "0.2.0" },
       },
     });
     return;
@@ -438,11 +438,21 @@ function handleNovaMessage(msg) {
       delete pendingRequests[msg.requestId];
 
       const resultText = msg.accepted ? "FILE_SAVED" : "DIFF_REJECTED";
+      const payload = { result: resultText };
+      // Surface user edits made in the proposed-changes tab before Accept.
+      // Lets Claude reconcile its plan with what was actually written to disk
+      // (mirrors the v2.1.110 Write+IDE diff awareness behaviour).
+      if (msg.userEdited) {
+        payload.userEdited = true;
+        if (msg.finalContent !== undefined) {
+          payload.finalContent = msg.finalContent;
+        }
+      }
       sendWSMessage(pending.client, {
         jsonrpc: "2.0",
         id: pending.mcpId,
         result: {
-          content: [{ type: "text", text: JSON.stringify({ result: resultText }) }],
+          content: [{ type: "text", text: JSON.stringify(payload) }],
         },
       });
     }
@@ -495,18 +505,34 @@ async function startServer() {
       return;
     }
 
+    // RFC 6455 §1.3 — magic GUID concatenated with the client's
+    // Sec-WebSocket-Key to compute Sec-WebSocket-Accept. The previous
+    // value here had transposed digits, which made every `ws`-library
+    // client (including Claude Code CLI) close with ECONNRESET ~5 ms
+    // after the 101 handshake.
     const acceptKey = crypto
       .createHash("sha1")
-      .update(key + "258EAFA5-E914-47DA-95CA-5AB5DC11CE56")
+      .update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
       .digest("base64");
 
-    socket.write(
+    // Echo back the first requested subprotocol. The `ws` Node.js library
+    // (used by Claude Code CLI) hard-resets the TCP connection right after
+    // the 101 if the client offered subprotocols and the server selected
+    // none — symptom: ECONNRESET ~5 ms after "client connected".
+    const offeredProtocols = (req.headers["sec-websocket-protocol"] || "")
+      .split(",").map((s) => s.trim()).filter(Boolean);
+    const selectedProtocol = offeredProtocols[0] || null;
+
+    let responseHeaders =
       "HTTP/1.1 101 Switching Protocols\r\n" +
       "Upgrade: websocket\r\n" +
       "Connection: Upgrade\r\n" +
-      `Sec-WebSocket-Accept: ${acceptKey}\r\n` +
-      "\r\n"
-    );
+      `Sec-WebSocket-Accept: ${acceptKey}\r\n`;
+    if (selectedProtocol) {
+      responseHeaders += `Sec-WebSocket-Protocol: ${selectedProtocol}\r\n`;
+    }
+    responseHeaders += "\r\n";
+    socket.write(responseHeaders);
 
     // Client connected
     const client = { socket, buffer: Buffer.alloc(0) };
@@ -538,9 +564,9 @@ async function startServer() {
       }
     });
 
-    socket.on("close", () => {
+    socket.on("close", (hadError) => {
       connectedClients = connectedClients.filter((c) => c !== client);
-      log("info", "Claude Code client disconnected");
+      log("info", `Claude Code client disconnected (hadError=${hadError})`);
       sendToNova({ type: "client_disconnected", clientCount: connectedClients.length });
     });
 
