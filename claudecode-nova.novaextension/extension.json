@@ -1,9 +1,9 @@
 {
-  "identifier": "com.marcbourget.claudecode-nova",
+  "identifier": "ca.okapi.claudecode-nova",
   "name": "Claude Code Bridge",
-  "organization": "Marc Bourget",
+  "organization": "okapi-ca",
   "description": "Integrates Claude Code CLI with Nova via the WebSocket MCP protocol, providing context sharing, diff viewing, and selection tracking.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "categories": ["commands", "sidebars"],
   "license": "MIT",
   "repository": "https://github.com/okapi-ca/claudecode-nova",

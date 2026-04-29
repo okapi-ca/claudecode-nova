@@ -125,7 +125,7 @@ These are the tools that Claude Code can invoke through the bridge, matching the
 The Claude Code CLI only forwards `mcp__ide__getDiagnostics` to the model — the other 9 tools registered by `ws-server.js` are consumed internally by the CLI and not callable from a model conversation. For debugging or scripting, `Scripts/call-bridge.js` connects to the running bridge directly via the lock file and invokes any tool by name. No npm dependencies.
 
 ```bash
-SCRIPT="$HOME/Library/Application Support/Nova/Extensions/com.marcbourget.claudecode-nova/Scripts/call-bridge.js"
+SCRIPT="$HOME/Library/Application Support/Nova/Extensions/ca.okapi.claudecode-nova/Scripts/call-bridge.js"
 # (or wherever the extension is installed; for development use the project path)
 
 node "$SCRIPT" --tools                         # list tools advertised by the bridge

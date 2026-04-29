@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.1 — 2026-04-29
+
+### Changed
+- **Identifier renamed** from `com.marcbourget.claudecode-nova` to
+  `ca.okapi.claudecode-nova` to match the `okapi-ca` organization
+  registered on the Panic Extension Library. Required for marketplace
+  publication — Panic ties extensions to a registered organization
+  via the reverse-DNS prefix of the identifier, and the `com.marcbourget`
+  prefix had no corresponding org. Organization metadata in the manifest
+  was updated from `"Marc Bourget"` to `"okapi-ca"` for the same reason.
+- **Side-effect on local installs**: Nova treats the new identifier as
+  a different extension. Anyone who previously installed v0.2.0 from
+  source under `com.marcbourget.claudecode-nova/` should remove that
+  directory and copy the new bundle to `ca.okapi.claudecode-nova/`,
+  otherwise both versions cohabit and the bridge port allocation can
+  collide.
+
 ## 0.2.0 — 2026-04-29
 
 ### Added
