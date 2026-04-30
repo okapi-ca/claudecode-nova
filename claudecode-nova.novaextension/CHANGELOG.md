@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.3.0 — 2026-04-30
+
+### Added
+- **Real line/column numbers in selections** — `getCurrentSelection`,
+  `getLatestSelection`, and live `selection_update` payloads now expose
+  0-indexed `startLine` / `endLine` / `startColumn` / `endColumn`
+  computed from the document offset (was hardcoded to 0). The
+  `selection_sent` activity events render as `(L42-L58)` in the
+  sidebar.
+- **Git branch in context** — current branch is cached via
+  `git rev-parse --abbrev-ref HEAD` (refreshed on bridge start and
+  every 5 minutes) and shipped in every `selection_update` and
+  `getWorkspaceFolders` response. Silently null outside git repos.
+- **Diff line stats** — every `openDiff` computes a lightweight
+  `+N / -M lines` delta (multiset line intersection vs. the file on
+  disk; detects new files) and surfaces it in the system notification,
+  the Pending Diffs sidebar label, the row tooltip, and the details
+  dialog.
+- **Pending Diffs tooltip preview** — hovering a diff row now shows
+  the first 5 lines of the proposed content with an overflow marker.
+- **Activity log persistence** — `activityLog` and `toolCallLog` are
+  serialized to `globalStoragePath/activity.json` (debounced 1s) and
+  restored on activate. `pendingDiffs` are intentionally not persisted
+  (their Claude-side `requestId`s die with the session).
+- **`claudecode.diffTimeoutMinutes`** setting (default 30, 0 disables)
+  — auto-rejects pending diffs older than the threshold via the
+  existing 30s sidebar tick. Stops dead `requestId`s from piling up
+  when Claude crashes mid-flow.
+- **`Restart Claude Code Bridge`** command (`claudecode.restart`) —
+  stop + 300ms + start, useful after changing the port range or the
+  Node.js path.
+- **Default keyboard shortcuts**:
+  - `Cmd+Ctrl+L` → Send Selection to Claude (when a selection exists)
+  - `Cmd+Ctrl+A` → Add Current File to Claude
+  Avoids `Cmd+Shift+L` which Nova already uses for "Reveal in Files
+  Sidebar".
+- **`claudecode.claudeArgs`** per-workspace setting — extra arguments
+  appended after the Claude command in `Launch Claude Code`. Unlocks
+  `--continue`, `--model claude-opus-4-7`,
+  `--dangerously-skip-permissions`, etc. without code changes.
+- **Auto-save before `Send Selection to Claude`** — if the document is
+  dirty, it's saved first so Claude's disk-reading tools (Read, Bash)
+  see the same content as the buffer.
+
+### Fixed
+- **`closeAllDiffTabs` no longer leaks pending diffs** — the tool now
+  rejects every still-pending diff via `resolveDiff(id, false)` before
+  sweeping the temp-file directory, freeing Claude-side `requestId`s
+  that would otherwise wait forever. The Nova editor tabs themselves
+  still need a manual `Cmd+W` (no public tab-close API in Nova).
+
+### Notes
+- No protocol changes; `ws-server.js` is untouched.
+- All payload additions are additive — existing Claude Code clients
+  will simply ignore the new fields (`gitBranch`, `startLine`,
+  `endLine`, …).
+
 ## 0.2.1 — 2026-04-29
 
 ### Changed
