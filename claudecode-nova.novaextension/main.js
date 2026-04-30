@@ -31,6 +31,16 @@ let pendingDiffs = [];
 const ACTIVITY_MAX = 50;
 const TOOLCALLS_MAX = 100;
 let activityRefreshTimer = null;
+let activityPersistTimer = null;
+const ACTIVITY_PERSIST_DEBOUNCE_MS = 1000;
+
+// Git branch cache. Refreshed on bridge start, after notable events, and on
+// a 5-minute interval. Sent in selection_update payloads and surfaced in
+// getWorkspaceFolders so Claude can mention "you're on feature/foo" without
+// having to call out to git itself.
+let gitBranch = null;
+let gitBranchTimer = null;
+const GIT_BRANCH_REFRESH_MS = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Lifecycle
@@ -43,6 +53,7 @@ exports.activate = function() {
     disposables.push(
       nova.commands.register("claudecode.start", startBridge),
       nova.commands.register("claudecode.stop", stopBridge),
+      nova.commands.register("claudecode.restart", restartBridge),
       nova.commands.register("claudecode.sendSelection", sendSelectionToContext),
       nova.commands.register("claudecode.addFile", addCurrentFile),
       nova.commands.register("claudecode.status", showStatus),
@@ -60,10 +71,15 @@ exports.activate = function() {
     return;
   }
 
+  // Restore the persisted activity log (best-effort) before any UI renders,
+  // so reopening Nova doesn't wipe the user's recent context.
+  loadActivityLog();
+
   // Pre-build the activity sidebars so they render immediately
   // (placeholder text) instead of staying blank until the first event.
   ensureActivitySidebars();
   startActivityRefreshTimer();
+  startGitBranchRefresh();
 
   const autoStart = nova.config.get("claudecode.autoStart");
   if (autoStart !== false) {
@@ -81,6 +97,8 @@ exports.activate = function() {
 exports.deactivate = function() {
   console.log("Claude Code Bridge: deactivating…");
   stopActivityRefreshTimer();
+  stopGitBranchRefresh();
+  flushActivityLog();
   stopBridge();
   for (const d of disposables) {
     try { d.dispose(); } catch (_) {}
@@ -212,6 +230,10 @@ function startBridge() {
     startSelectionTracking();
   }
 
+  // Refresh the git branch cache now so it's already populated for the
+  // first selection_update / getWorkspaceFolders call.
+  refreshGitBranch();
+
   showNotification("Starting", "Claude Code Bridge is starting…");
 }
 
@@ -227,6 +249,24 @@ function stopBridge() {
     updateSidebar();
     showNotification("Stopped", "Claude Code Bridge has been stopped.");
   }
+}
+
+// Stop + start with a short delay so the OS releases the port before we rebind.
+// Useful after changing the port range or the Node.js path.
+function restartBridge() {
+  var wasRunning = !!serverProcess;
+  stopBridge();
+  setTimeout(function() {
+    try {
+      startBridge();
+      if (wasRunning) {
+        showNotification("Restarted", "Claude Code Bridge has been restarted.");
+      }
+    } catch (err) {
+      console.error("Claude Code Bridge: restart failed:", err.message);
+      showNotification("Restart Failed", err.message);
+    }
+  }, 300);
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +441,11 @@ async function toolOpenDiff(args, requestId) {
     await nova.workspace.openFile(filePath);
     await nova.workspace.openFile(tmpFile);
 
+    // Cheap line-count delta. Not a real LCS diff — just enough so the user
+    // can spot a 200-line rewrite vs. a 3-line tweak at a glance. We read the
+    // original file from disk (best-effort: missing file = new file = all add).
+    var stats = computeDiffStats(filePath, newContent);
+
     var diffId = "diff_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
     pendingDiffs.unshift({
       id: diffId,
@@ -410,13 +455,14 @@ async function toolOpenDiff(args, requestId) {
       tabName: tabName || "proposed",
       requestId: requestId,
       openedAt: Date.now(),
+      stats: stats,
     });
-    logActivity("diff_proposed", { filePath: filePath, diffId: diffId });
+    logActivity("diff_proposed", { filePath: filePath, diffId: diffId, stats: stats });
     refreshActivitySidebar();
 
     var notification = new NotificationRequest("claudecode-diff-" + diffId);
     notification.title = "Claude Code Diff";
-    notification.body = "Review changes for " + nova.path.basename(filePath) + ".\nProposed changes are open in a new tab (" + (tabName || "proposed") + ").";
+    notification.body = "Review changes for " + nova.path.basename(filePath) + " (" + formatStats(stats) + ").\nProposed changes are open in a new tab (" + (tabName || "proposed") + ").";
     notification.actions = ["Accept Changes", "Reject"];
 
     nova.notifications.add(notification).then(function(response) {
@@ -484,6 +530,27 @@ function resolveDiff(diffId, accepted) {
   });
 }
 
+// Convert a character offset into a 0-indexed (line, column) position by
+// reading the prefix up to the offset and counting newlines. Nova's Range
+// is character-offset based and exposes no direct line API, so this is the
+// only path. Cost is O(offset) — fine for normal source files; if perf
+// becomes an issue on huge documents we can cache (offset → line) per doc
+// version.
+function offsetToPosition(doc, offset) {
+  if (!doc || offset <= 0) return { line: 0, column: 0 };
+  var clamped = Math.min(offset, doc.length);
+  var prefix = doc.getTextInRange(new Range(0, clamped));
+  var line = 0;
+  var lastNewline = -1;
+  for (var i = 0; i < prefix.length; i++) {
+    if (prefix.charCodeAt(i) === 10) {
+      line++;
+      lastNewline = i;
+    }
+  }
+  return { line: line, column: clamped - lastNewline - 1 };
+}
+
 // --- getCurrentSelection ---
 function toolGetCurrentSelection() {
   var editor = nova.workspace.activeTextEditor;
@@ -492,14 +559,16 @@ function toolGetCurrentSelection() {
   var range = editor.selectedRange;
   var text = editor.selectedText || "";
   var doc = editor.document;
+  var startPos = offsetToPosition(doc, range.start);
+  var endPos = offsetToPosition(doc, range.end);
 
   return {
     text: text,
     filePath: doc.path || null,
-    startLine: 0,
-    endLine: 0,
-    startColumn: 0,
-    endColumn: 0,
+    startLine: startPos.line,
+    endLine: endPos.line,
+    startColumn: startPos.column,
+    endColumn: endPos.column,
     isEmpty: range.length === 0,
   };
 }
@@ -530,6 +599,7 @@ function toolGetWorkspaceFolders() {
   var wsPath = nova.workspace.path;
   return {
     folders: wsPath ? [{ uri: "file://" + wsPath, name: nova.path.basename(wsPath) }] : [],
+    gitBranch: gitBranch,
   };
 }
 
@@ -566,18 +636,35 @@ function toolGetDiagnostics(args) {
 }
 
 // --- closeAllDiffTabs ---
+//
+// Reject every still-pending diff first — otherwise Claude is stuck waiting
+// on a `diff_response` for a requestId we've thrown away — then sweep the
+// temp-file directory. The Nova editor tabs themselves stay open (no public
+// tab-close API), but the underlying state is now consistent.
 function toolCloseAllDiffTabs() {
+  var rejected = 0;
+  // Snapshot first: resolveDiff() mutates pendingDiffs in place.
+  var snapshot = pendingDiffs.slice();
+  for (var i = 0; i < snapshot.length; i++) {
+    try {
+      resolveDiff(snapshot[i].id, false);
+      rejected++;
+    } catch (err) {
+      console.error("Claude Code Bridge: failed to reject diff during closeAllDiffTabs:", err.message);
+    }
+  }
+
   try {
     var tmpDir = nova.path.join(nova.extension.globalStoragePath, "diffs");
     if (nova.fs.stat(tmpDir)) {
       var items = nova.fs.listdir(tmpDir);
-      for (var i = 0; i < items.length; i++) {
-        try { nova.fs.remove(nova.path.join(tmpDir, items[i])); } catch (_) {}
+      for (var j = 0; j < items.length; j++) {
+        try { nova.fs.remove(nova.path.join(tmpDir, items[j])); } catch (_) {}
       }
     }
   } catch (_) {}
 
-  return { success: true };
+  return { success: true, rejected: rejected };
 }
 
 // ---------------------------------------------------------------------------
@@ -613,14 +700,19 @@ function buildSelectionData(editor) {
   var range = editor.selectedRange;
   var text = editor.selectedText || "";
   var doc = editor.document;
+  var startPos = offsetToPosition(doc, range.start);
+  var endPos = offsetToPosition(doc, range.end);
 
   return {
     filePath: doc.path || null,
     text: text,
-    startLine: 0,
-    endLine: 0,
+    startLine: startPos.line,
+    endLine: endPos.line,
+    startColumn: startPos.column,
+    endColumn: endPos.column,
     isEmpty: range.length === 0,
     syntax: doc.syntax || "plaintext",
+    gitBranch: gitBranch,
   };
 }
 
@@ -628,14 +720,27 @@ function buildSelectionData(editor) {
 // Commands
 // ---------------------------------------------------------------------------
 
-function sendSelectionToContext(editor) {
+async function sendSelectionToContext(editor) {
   if (!editor) editor = nova.workspace.activeTextEditor;
   if (!editor) return;
+
+  // Save first if dirty so Claude sees the same content the user does. The
+  // selection text comes from the in-memory buffer regardless, but file-path
+  // references on Claude's side are read from disk — keep them aligned.
+  if (editor.document.isDirty && editor.document.path) {
+    try { await editor.save(); }
+    catch (err) { console.warn("Claude Code Bridge: auto-save before send failed:", err.message); }
+  }
 
   var selection = buildSelectionData(editor);
   if (selection && selection.text) {
     sendToServer({ type: "selection_update", data: selection });
-    logActivity("selection_sent", { filePath: selection.filePath, length: selection.text.length });
+    logActivity("selection_sent", {
+      filePath: selection.filePath,
+      length: selection.text.length,
+      startLine: selection.startLine,
+      endLine: selection.endLine,
+    });
     refreshActivitySidebar();
     showNotification("Sent", "Selection sent to Claude Code context.");
   } else {
@@ -743,7 +848,7 @@ class PendingDiffsDataProvider {
       var item = new TreeItem(nova.path.basename(d.filePath));
       item.identifier = d.id;
       item.descriptiveText = relativeTime(d.openedAt);
-      item.tooltip = d.filePath + "\nProposed " + new Date(d.openedAt).toLocaleString();
+      item.tooltip = buildDiffTooltip(d);
       item.collapsibleState = TreeItemCollapsibleState.Expanded;
       item.command = "claudecode.diffShowDetails";
       return item;
@@ -858,7 +963,7 @@ function refreshActivitySidebar() {
 
 function startActivityRefreshTimer() {
   if (activityRefreshTimer) return;
-  activityRefreshTimer = setInterval(refreshActivitySidebar, 30000);
+  activityRefreshTimer = setInterval(activityTick, 30000);
 }
 
 function stopActivityRefreshTimer() {
@@ -866,6 +971,87 @@ function stopActivityRefreshTimer() {
     clearInterval(activityRefreshTimer);
     activityRefreshTimer = null;
   }
+}
+
+// Combined tick: keep relative timestamps fresh AND auto-reject diffs that
+// have been pending too long. Driven by a single 30s interval so we don't
+// stack timers.
+function activityTick() {
+  sweepStaleDiffs();
+  refreshActivitySidebar();
+}
+
+// Auto-reject diffs older than `claudecode.diffTimeoutMinutes`. Catches the
+// case where Claude crashes or disconnects mid-flow — without this the
+// requestId stays in pendingDiffs forever and the sidebar fills up. Set the
+// setting to 0 to disable.
+function sweepStaleDiffs() {
+  var minutes = nova.config.get("claudecode.diffTimeoutMinutes");
+  if (typeof minutes !== "number") minutes = 30;
+  if (minutes <= 0) return;
+  var cutoff = Date.now() - minutes * 60 * 1000;
+  var stale = pendingDiffs.filter(function(d) { return d.openedAt < cutoff; });
+  for (var i = 0; i < stale.length; i++) {
+    console.log("Claude Code Bridge: auto-rejecting stale diff for " + stale[i].filePath);
+    try { resolveDiff(stale[i].id, false); } catch (_) {}
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Git branch tracking
+// ---------------------------------------------------------------------------
+//
+// `git rev-parse --abbrev-ref HEAD` gives us the current branch (or "HEAD"
+// if detached). We cache the result and refresh on bridge start, after the
+// 5-minute interval, and on demand. The cached value is included in
+// selection_update payloads (cheap, just a string) and in
+// getWorkspaceFolders.
+
+function startGitBranchRefresh() {
+  refreshGitBranch();
+  if (gitBranchTimer) return;
+  gitBranchTimer = setInterval(refreshGitBranch, GIT_BRANCH_REFRESH_MS);
+}
+
+function stopGitBranchRefresh() {
+  if (gitBranchTimer) {
+    clearInterval(gitBranchTimer);
+    gitBranchTimer = null;
+  }
+}
+
+function refreshGitBranch() {
+  var workspace = nova.workspace.path;
+  if (!workspace) {
+    gitBranch = null;
+    return;
+  }
+  var proc;
+  try {
+    proc = new Process("/usr/bin/env", {
+      args: ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+      cwd: workspace,
+      shell: false,
+    });
+  } catch (err) {
+    console.warn("Claude Code Bridge: cannot spawn git:", err.message);
+    return;
+  }
+  var stdout = "";
+  proc.onStdout(function(d) { stdout += d; });
+  proc.onDidExit(function(code) {
+    if (code === 0) {
+      var branch = stdout.trim();
+      if (branch && branch !== gitBranch) {
+        console.log("Claude Code Bridge: git branch = " + branch);
+      }
+      gitBranch = branch || null;
+    } else {
+      // Not a git repo, or git not installed. Stay quiet.
+      gitBranch = null;
+    }
+  });
+  try { proc.start(); } catch (_) { gitBranch = null; }
 }
 
 // ---------------------------------------------------------------------------
@@ -881,6 +1067,7 @@ function logActivity(type, data) {
   if (activityLog.length > ACTIVITY_MAX) {
     activityLog.length = ACTIVITY_MAX;
   }
+  scheduleActivityPersist();
 }
 
 function logToolCall(tool, args, result) {
@@ -899,6 +1086,68 @@ function logToolCall(tool, args, result) {
   if (toolCallLog.length > TOOLCALLS_MAX) {
     toolCallLog.length = TOOLCALLS_MAX;
   }
+  scheduleActivityPersist();
+}
+
+// Persistence — store the activity + tool-call buffers so reopening Nova
+// keeps recent context visible. We don't persist `pendingDiffs`: each diff
+// holds a Claude-side requestId from a session that is gone after a
+// restart, so reviving it would just produce dangling responses.
+function activityStorePath() {
+  return nova.path.join(nova.extension.globalStoragePath, "activity.json");
+}
+
+function loadActivityLog() {
+  try {
+    var path = activityStorePath();
+    if (!nova.fs.stat(path)) return;
+    var f = nova.fs.open(path, "r");
+    var raw = f.read() || "";
+    f.close();
+    if (!raw) return;
+    var parsed = JSON.parse(raw);
+    if (Array.isArray(parsed.activityLog)) {
+      activityLog = parsed.activityLog.slice(0, ACTIVITY_MAX);
+    }
+    if (Array.isArray(parsed.toolCallLog)) {
+      toolCallLog = parsed.toolCallLog.slice(0, TOOLCALLS_MAX);
+    }
+    console.log("Claude Code Bridge: restored activity log (" +
+      activityLog.length + " events, " + toolCallLog.length + " tool calls)");
+  } catch (err) {
+    console.warn("Claude Code Bridge: could not restore activity log:", err.message);
+    // Bad file? Wipe it so we don't keep failing every session.
+    try { nova.fs.remove(activityStorePath()); } catch (_) {}
+  }
+}
+
+function scheduleActivityPersist() {
+  if (activityPersistTimer) return;
+  activityPersistTimer = setTimeout(function() {
+    activityPersistTimer = null;
+    flushActivityLog();
+  }, ACTIVITY_PERSIST_DEBOUNCE_MS);
+}
+
+function flushActivityLog() {
+  if (activityPersistTimer) {
+    clearTimeout(activityPersistTimer);
+    activityPersistTimer = null;
+  }
+  try {
+    var dir = nova.extension.globalStoragePath;
+    try { nova.fs.mkdir(dir); } catch (_) {}
+    var f = nova.fs.open(activityStorePath(), "w");
+    f.write(JSON.stringify({
+      version: 1,
+      savedAt: Date.now(),
+      activityLog: activityLog,
+      toolCallLog: toolCallLog,
+    }));
+    f.close();
+  } catch (err) {
+    console.warn("Claude Code Bridge: could not persist activity log:", err.message);
+  }
 }
 
 function relativeTime(ts) {
@@ -916,12 +1165,24 @@ function formatActivityLabel(e) {
     case "file_opened":    return "📄  Opened " + basename;
     case "file_saved":     return "💾  Saved " + basename;
     case "file_added":     return "➕  Added " + basename + " to context";
-    case "selection_sent": return "✂️  Sent selection from " + basename;
-    case "diff_proposed":  return "⚠️  Diff proposed: " + basename;
+    case "selection_sent": return "✂️  Sent selection from " + basename + formatLineRange(e);
+    case "diff_proposed":  return "⚠️  Diff proposed: " + basename + (e.stats ? " (" + formatStats(e.stats) + ")" : "");
     case "diff_accepted":  return "✓  Accepted diff: " + basename + (e.userEdited ? " (with your edits)" : "");
     case "diff_rejected":  return "✗  Rejected diff: " + basename;
     default:               return e.type + (basename !== "?" ? " · " + basename : "");
   }
+}
+
+// Format "L42" or "L42-L58" suffix, leading space included. Returns "" if
+// the event has no line info (older persisted events from before line
+// numbers were tracked).
+function formatLineRange(e) {
+  if (typeof e.startLine !== "number" || typeof e.endLine !== "number") return "";
+  // Lines are 0-indexed internally; show 1-indexed to match the way users
+  // read code in the editor margin.
+  var s = e.startLine + 1;
+  var en = e.endLine + 1;
+  return s === en ? " (L" + s + ")" : " (L" + s + "-L" + en + ")";
 }
 
 function formatActivityTooltip(e) {
@@ -932,6 +1193,92 @@ function formatActivityTooltip(e) {
   if (e.userEdited) lines.push("User edited the proposed content before accepting.");
   if (typeof e.length === "number") lines.push(e.length + " characters");
   return lines.join("\n");
+}
+
+// Tooltip for a Pending Diffs row — file path, timestamp, length, then a
+// peek of the first lines so the user can tell diffs apart without opening
+// the proposed_* tab.
+const DIFF_TOOLTIP_PREVIEW_LINES = 5;
+const DIFF_TOOLTIP_PREVIEW_LINE_MAX = 100;
+
+function buildDiffTooltip(d) {
+  var lines = [];
+  lines.push(d.filePath);
+  lines.push("Proposed " + new Date(d.openedAt).toLocaleString());
+  if (d.stats) lines.push(formatStats(d.stats));
+  lines.push((d.newContent ? d.newContent.length : 0) + " characters proposed");
+
+  var content = d.newContent || "";
+  if (content.length > 0) {
+    var preview = content.split("\n").slice(0, DIFF_TOOLTIP_PREVIEW_LINES).map(function(line) {
+      return line.length > DIFF_TOOLTIP_PREVIEW_LINE_MAX
+        ? line.slice(0, DIFF_TOOLTIP_PREVIEW_LINE_MAX) + "…"
+        : line;
+    });
+    lines.push("");
+    lines.push("Preview:");
+    lines.push.apply(lines, preview);
+    var totalLines = (content.match(/\n/g) || []).length + 1;
+    if (totalLines > DIFF_TOOLTIP_PREVIEW_LINES) {
+      lines.push("… (" + (totalLines - DIFF_TOOLTIP_PREVIEW_LINES) + " more lines)");
+    }
+  }
+  return lines.join("\n");
+}
+
+// Lightweight diff stats: count lines that are common between original and
+// proposed (set intersection on lines), then derive added = new - common,
+// removed = old - common. This isn't an exact diff (no positional sense, two
+// identical lines count once) but it gives an order-of-magnitude feel for
+// "1-line tweak vs. 80-line rewrite" — which is all we need here.
+function computeDiffStats(filePath, newContent) {
+  var oldContent = "";
+  var isNewFile = false;
+  try {
+    if (nova.fs.stat(filePath)) {
+      var f = nova.fs.open(filePath, "r");
+      oldContent = f.read() || "";
+      f.close();
+    } else {
+      isNewFile = true;
+    }
+  } catch (_) {
+    isNewFile = true;
+  }
+
+  var oldLines = oldContent.length === 0 ? [] : oldContent.split("\n");
+  var newLines = (newContent || "").length === 0 ? [] : (newContent || "").split("\n");
+
+  if (isNewFile) {
+    return { added: newLines.length, removed: 0, oldLineCount: 0, newLineCount: newLines.length, isNewFile: true };
+  }
+
+  // Multiset intersection so duplicate lines are counted properly.
+  var oldCounts = Object.create(null);
+  for (var i = 0; i < oldLines.length; i++) {
+    oldCounts[oldLines[i]] = (oldCounts[oldLines[i]] || 0) + 1;
+  }
+  var common = 0;
+  for (var j = 0; j < newLines.length; j++) {
+    if (oldCounts[newLines[j]] > 0) {
+      common++;
+      oldCounts[newLines[j]]--;
+    }
+  }
+
+  return {
+    added: newLines.length - common,
+    removed: oldLines.length - common,
+    oldLineCount: oldLines.length,
+    newLineCount: newLines.length,
+    isNewFile: false,
+  };
+}
+
+function formatStats(stats) {
+  if (!stats) return "";
+  if (stats.isNewFile) return "new file, +" + stats.added + " lines";
+  return "+" + stats.added + " / -" + stats.removed + " lines";
 }
 
 // ---------------------------------------------------------------------------
@@ -986,10 +1333,14 @@ function diffShowDetailsHandler() {
   if (!diff) return;
   var req = new NotificationRequest("claudecode-diff-details-" + diffId);
   req.title = "Diff: " + nova.path.basename(diff.filePath);
-  req.body = diff.filePath +
-             "\nProposed: " + new Date(diff.openedAt).toLocaleString() +
-             "\nProposal length: " + diff.newContent.length + " characters" +
-             "\nTab name: " + diff.tabName;
+  var bodyLines = [
+    diff.filePath,
+    "Proposed: " + new Date(diff.openedAt).toLocaleString(),
+  ];
+  if (diff.stats) bodyLines.push("Change: " + formatStats(diff.stats));
+  bodyLines.push("Proposal length: " + diff.newContent.length + " characters");
+  bodyLines.push("Tab name: " + diff.tabName);
+  req.body = bodyLines.join("\n");
   req.actions = ["Open Proposed Tab", "Accept", "Reject", "Cancel"];
   nova.notifications.add(req).then(function(response) {
     if (response.actionIdx === 0) {
@@ -1049,8 +1400,13 @@ async function launchClaude() {
 
   var workspace = nova.workspace.path || nova.environment["HOME"];
   var claudeCmd = nova.workspace.config.get("claudecode.claudeCommand") || "claude";
+  // Per-workspace extra args (e.g. "--continue", "--model claude-opus-4-7").
+  // Trimmed and appended verbatim — the user is in charge of quoting if a
+  // value contains spaces, just as if they typed the command themselves.
+  var claudeArgs = (nova.workspace.config.get("claudecode.claudeArgs") || "").trim();
   var envPrefix = "CLAUDE_CODE_SSE_PORT=" + serverPort + " ENABLE_IDE_INTEGRATION=true";
   var fullCommand = "cd " + shellQuote(workspace) + " && " + envPrefix + " " + claudeCmd;
+  if (claudeArgs) fullCommand += " " + claudeArgs;
 
   var app = resolveTerminalApp();
 

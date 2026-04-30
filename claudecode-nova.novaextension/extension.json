@@ -26,7 +26,8 @@
       {
         "title": "Send Selection to Claude",
         "command": "claudecode.sendSelection",
-        "when": "editorHasSelection"
+        "when": "editorHasSelection",
+        "shortcut": "cmd-ctrl-l"
       }
     ],
     "extensions": [
@@ -39,8 +40,13 @@
         "command": "claudecode.stop"
       },
       {
+        "title": "Restart Claude Code Bridge",
+        "command": "claudecode.restart"
+      },
+      {
         "title": "Add Current File to Claude",
-        "command": "claudecode.addFile"
+        "command": "claudecode.addFile",
+        "shortcut": "cmd-ctrl-a"
       },
       {
         "title": "Show Claude Code Status",
@@ -148,6 +154,13 @@
       "description": "Path to the node executable used for the WebSocket server helper."
     },
     {
+      "key": "claudecode.diffTimeoutMinutes",
+      "title": "Auto-reject pending diffs after (minutes)",
+      "type": "number",
+      "default": 30,
+      "description": "If a diff stays in the Pending Diffs queue longer than this, the bridge auto-rejects it so Claude isn't stuck waiting on a dead requestId. Set to 0 to disable."
+    },
+    {
       "key": "claudecode.terminalApp",
       "title": "Terminal Application",
       "type": "enum",
@@ -169,6 +182,13 @@
       "type": "string",
       "default": "claude",
       "description": "Command to launch Claude Code CLI."
+    },
+    {
+      "key": "claudecode.claudeArgs",
+      "title": "Extra Claude CLI arguments",
+      "type": "string",
+      "default": "",
+      "description": "Arguments appended after the Claude command on launch (e.g. \"--continue\", \"--model claude-opus-4-7\", \"--dangerously-skip-permissions\"). Leave blank for default behaviour."
     }
   ]
 }
