@@ -734,7 +734,19 @@ async function sendSelectionToContext(editor) {
 
   var selection = buildSelectionData(editor);
   if (selection && selection.text) {
+    // Update getCurrentSelection state on Claude's side
     sendToServer({ type: "selection_update", data: selection });
+    // Add the selection to Claude's context (the actual "@file:lines" mechanism)
+    if (selection.filePath) {
+      sendToServer({
+        type: "at_mention",
+        data: {
+          filePath: selection.filePath,
+          lineStart: selection.startLine,
+          lineEnd: selection.endLine,
+        },
+      });
+    }
     logActivity("selection_sent", {
       filePath: selection.filePath,
       length: selection.text.length,
@@ -756,22 +768,18 @@ function addCurrentFile() {
   }
 
   var filePath = editor.document.path;
-  var content = editor.document.getTextInRange(new Range(0, editor.document.length));
 
+  // Send ONLY the @-mention (without lineStart/lineEnd → whole file). Sending
+  // a selection_update alongside would confuse Claude, which would interpret
+  // the (0,0) line range as "0 lines selected" and truncate the context.
   sendToServer({
-    type: "selection_update",
+    type: "at_mention",
     data: {
       filePath: filePath,
-      text: content,
-      startLine: 0,
-      endLine: 0,
-      isEmpty: false,
-      syntax: editor.document.syntax || "plaintext",
-      isWholeFile: true,
     },
   });
 
-  logActivity("file_added", { filePath: filePath, length: content.length });
+  logActivity("file_added", { filePath: filePath, length: editor.document.length });
   refreshActivitySidebar();
   showNotification("File Added", nova.path.basename(filePath) + " added to Claude context.");
 }
@@ -1446,10 +1454,16 @@ function resolveTerminalApp() {
   return isAppInstalled("iTerm") ? "iTerm" : "Terminal";
 }
 
-// Quick existence check via /Applications and ~/Applications.
+// Quick existence check across the standard install locations on macOS.
+// Terminal.app ships in /System/Applications/Utilities/ on modern macOS,
+// not /Applications/ — missing that path was a long-standing bug that made
+// the auto-detect fall through to clipboard mode on stock systems.
 function isAppInstalled(name) {
   var candidates = [
     "/Applications/" + name + ".app",
+    "/Applications/Utilities/" + name + ".app",
+    "/System/Applications/" + name + ".app",
+    "/System/Applications/Utilities/" + name + ".app",
     nova.environment["HOME"] + "/Applications/" + name + ".app",
   ];
   for (var i = 0; i < candidates.length; i++) {

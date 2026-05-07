@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.4.0 — 2026-05-07
+
+### Fixed
+- **`Add Current File to Claude` actually attaches the file** — emits the
+  proper `at_mentioned` notification matching the Neovim/VS Code protocol
+  (`{filePath}` for whole files, no `lineStart`/`lineEnd`). Previously it
+  only sent a `selection_update` with `(0, 0)` line range, which Claude
+  interpreted as "0 lines selected" and truncated the context.
+- **`selection_changed` notification format** — method renamed from
+  `notifications/selectionChanged` (which Claude silently ignored) to
+  `selection_changed`, and the payload reshaped to the nested
+  `{text, filePath, fileUrl, selection: {start: {line, character}, end:
+  {…}, isEmpty}}` structure expected by Claude Code clients. The
+  selection-tracking feature now actually works on the Claude side.
+- **`Send Selection to Claude` also at-mentions the range** — alongside
+  the existing selection broadcast, the command now emits
+  `at_mentioned` with `lineStart`/`lineEnd` so Claude's REPL shows the
+  same `@file:lines` reference the user would type by hand.
+- **`Launch Claude Code` finds Terminal.app on modern macOS** —
+  `isAppInstalled()` now also checks `/System/Applications/Utilities/`
+  and `/Applications/Utilities/`. Ships in macOS Catalina+ in the
+  system path; the previous `/Applications/` + `~/Applications/` lookup
+  always missed it on stock systems.
+- **`clipboard` entitlement declared in manifest** — required for
+  `Launch Claude Code` to copy the command in clipboard mode (and the
+  fallback when no supported terminal is detected). Without it, the
+  command threw `Extension does not declare the entitlement for
+  clipboard access`.
+- **Removed stale `Scripts/main.js` orphan** — a v0.1.0 entry-point
+  copy left behind during an earlier refactor was being loaded by Nova
+  in preference to the root `main.js` declared by `"main"` in the
+  manifest. Symptoms: Activity panel stuck on the placeholder text,
+  `claudecode.launchClaude` reported as "command not found", `⌘⌃A`
+  silent-no-op. Nova ignores `extension.json:main` and looks for
+  `Scripts/main.js` first; this version keeps both files in sync as
+  the workaround until Panic clarifies the loader behaviour.
+
+### Notes
+- No new MCP tools; the change is in IDE → Claude notifications, not
+  in `tools/list`. Existing clients keep working.
+- The `selection_changed` rename is a wire-format break vs 0.3.0 but
+  matches the documented Neovim/VS Code protocol and what Claude Code
+  CLI actually consumes — 0.3.0's emission was effectively a no-op on
+  Claude's side anyway.
+
 ## 0.3.0 — 2026-04-30
 
 ### Added

@@ -418,9 +418,33 @@ function handleNovaMessage(msg) {
     return;
   }
 
-  // Selection update broadcast
+  // Selection update broadcast — method name matches Neovim/VS Code protocol
+  // (no `notifications/` prefix). Claude Code uses this to track the current
+  // editor selection (visible via getCurrentSelection / getLatestSelection).
+  // The internal format from main.js uses flat startLine/endLine fields; we
+  // reshape it here into the nested {selection: {start, end, isEmpty}} that
+  // the protocol expects.
   if (msg.type === "selection_update") {
-    broadcastNotification("notifications/selectionChanged", msg.data);
+    const d = msg.data || {};
+    const params = {
+      text: d.text || "",
+      filePath: d.filePath || null,
+      fileUrl: d.filePath ? "file://" + d.filePath : null,
+      selection: {
+        start: { line: d.startLine || 0, character: d.startColumn || 0 },
+        end:   { line: d.endLine   || 0, character: d.endColumn   || 0 },
+        isEmpty: d.isEmpty || false,
+      },
+    };
+    broadcastNotification("selection_changed", params);
+    return;
+  }
+
+  // At-mention broadcast — adds a file or selection to Claude's context
+  // (the equivalent of typing `@filename` in the REPL). Method name matches
+  // the protocol used by VS Code and Neovim clients.
+  if (msg.type === "at_mention") {
+    broadcastNotification("at_mentioned", msg.data);
     return;
   }
 
