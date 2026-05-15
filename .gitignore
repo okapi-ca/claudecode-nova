@@ -2,4 +2,5 @@
 *.log
 node_modules/
 .nova/
+.claude/
 CLAUDE.md
