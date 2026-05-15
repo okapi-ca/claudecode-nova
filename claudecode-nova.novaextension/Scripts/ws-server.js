@@ -174,70 +174,91 @@ function registerTool(name, schema, description) {
   tools[name] = { schema, description };
 }
 
-// Register the 10 MCP tools that Claude Code expects (matching VS Code / Neovim)
+// Register the 12 MCP tools that Claude Code expects, matching the VS Code /
+// Neovim PROTOCOL.md schemas verbatim. Param names and casing here are the
+// contract Claude consumes via tools/list — don't deviate.
 registerTool("openFile", {
   type: "object",
   properties: {
-    filePath:  { type: "string", description: "Absolute path of the file to open" },
-    lineNumber: { type: "number", description: "Line number to scroll to" },
-    selectText: { type: "string", description: "Text to select after opening" },
+    filePath:           { type: "string",  description: "Path to the file to open" },
+    preview:            { type: "boolean", description: "Open in preview mode",                 default: false },
+    startText:          { type: "string",  description: "Text pattern marking selection start" },
+    endText:            { type: "string",  description: "Text pattern marking selection end" },
+    selectToEndOfLine:  { type: "boolean", description: "Extend selection to end of line",      default: false },
+    makeFrontmost:      { type: "boolean", description: "Make the file the active editor tab", default: true },
   },
   required: ["filePath"],
-}, "Open a file in the IDE");
+}, "Open a file in the editor and optionally select a range of text");
 
 registerTool("openDiff", {
   type: "object",
   properties: {
-    filePath: { type: "string", description: "Absolute file path" },
-    oldContent: { type: "string", description: "Original file content" },
-    newContent: { type: "string", description: "Proposed new content" },
-    tabName:   { type: "string", description: "Tab label for the diff view" },
+    old_file_path:     { type: "string", description: "Path to original file" },
+    new_file_path:     { type: "string", description: "Path to new file" },
+    new_file_contents: { type: "string", description: "Contents of the new file" },
+    tab_name:          { type: "string", description: "Tab name for the diff view" },
   },
-  required: ["filePath", "oldContent", "newContent"],
-}, "Open a diff view for proposed changes");
+  required: ["old_file_path", "new_file_path", "new_file_contents", "tab_name"],
+}, "Open a git diff for the file (blocking operation)");
 
 registerTool("getCurrentSelection", {
   type: "object", properties: {},
-}, "Get the current editor selection");
+}, "Get the current text selection in the active editor");
 
 registerTool("getLatestSelection", {
   type: "object", properties: {},
-}, "Get the most recent editor selection");
+}, "Get the most recent text selection (even if not in active editor)");
 
 registerTool("getOpenEditors", {
   type: "object", properties: {},
-}, "List all open editor tabs");
+}, "Get information about currently open editors");
 
 registerTool("getWorkspaceFolders", {
   type: "object", properties: {},
-}, "Get workspace folder paths");
+}, "Get all workspace folders currently open in the IDE");
 
 registerTool("checkDocumentDirty", {
   type: "object",
   properties: {
-    filePath: { type: "string", description: "File path to check" },
+    filePath: { type: "string", description: "Path to the file to check" },
   },
   required: ["filePath"],
-}, "Check if a document has unsaved changes");
+}, "Check if a document has unsaved changes (is dirty)");
 
 registerTool("saveDocument", {
   type: "object",
   properties: {
-    filePath: { type: "string", description: "File path to save" },
+    filePath: { type: "string", description: "Path to the file to save" },
   },
   required: ["filePath"],
-}, "Save a document");
+}, "Save a document with unsaved changes");
 
 registerTool("getDiagnostics", {
   type: "object",
   properties: {
-    filePath: { type: "string", description: "File path to get diagnostics for" },
+    uri: { type: "string", description: "File URI to get diagnostics for. If not provided, gets diagnostics for all files." },
   },
-}, "Get LSP diagnostics / issues for a file");
+}, "Get language diagnostics from the editor");
+
+registerTool("close_tab", {
+  type: "object",
+  properties: {
+    tab_name: { type: "string", description: "Name of the tab to close" },
+  },
+  required: ["tab_name"],
+}, "Close a tab by name");
 
 registerTool("closeAllDiffTabs", {
   type: "object", properties: {},
-}, "Clean up temporary diff files staged for review (Nova does not expose a tab-close API; this removes the proposed_* files in extension storage)");
+}, "Close all diff tabs in the editor");
+
+registerTool("executeCode", {
+  type: "object",
+  properties: {
+    code: { type: "string", description: "The code to be executed on the kernel" },
+  },
+  required: ["code"],
+}, "Execute Python code in the Jupyter kernel for the current notebook file");
 
 // ---------------------------------------------------------------------------
 // MCP message handling
@@ -406,13 +427,24 @@ function handleNovaMessage(msg) {
     if (pending) {
       clearTimeout(pending.timeout);
       delete pendingRequests[msg.requestId];
-      
+
+      // Spec output formats vary per tool: some return plain strings
+      // ("TAB_CLOSED", "Opened file: /path"), others return JSON-stringified
+      // objects. Preserve the handler's intent: a string result becomes the
+      // text verbatim, an object/array gets JSON-stringified, and an error
+      // surfaces via isError per MCP convention.
+      const r = msg.result;
+      const isErr = r && typeof r === "object" && r.error;
+      const text = (typeof r === "string")
+        ? r
+        : JSON.stringify(isErr ? { error: r.error } : r);
+      const payload = { content: [{ type: "text", text }] };
+      if (isErr) payload.isError = true;
+
       sendWSMessage(pending.client, {
         jsonrpc: "2.0",
         id: pending.mcpId,
-        result: {
-          content: [{ type: "text", text: JSON.stringify(msg.result) }],
-        },
+        result: payload,
       });
     }
     return;
@@ -462,21 +494,22 @@ function handleNovaMessage(msg) {
       delete pendingRequests[msg.requestId];
 
       const resultText = msg.accepted ? "FILE_SAVED" : "DIFF_REJECTED";
-      const payload = { result: resultText };
-      // Surface user edits made in the proposed-changes tab before Accept.
-      // Lets Claude reconcile its plan with what was actually written to disk
-      // (mirrors the v2.1.110 Write+IDE diff awareness behaviour).
+      // Happy path: plain string per PROTOCOL.md ("FILE_SAVED" / "DIFF_REJECTED").
+      // User-edit path: JSON envelope carrying the post-edit content so Claude
+      // can reconcile its plan with what actually hit disk (mirrors v2.1.110
+      // Write+IDE diff awareness). Strictly additive — only emitted when the
+      // user typed in the proposed-changes tab before Accept.
+      let text = resultText;
       if (msg.userEdited) {
-        payload.userEdited = true;
-        if (msg.finalContent !== undefined) {
-          payload.finalContent = msg.finalContent;
-        }
+        const payload = { result: resultText, userEdited: true };
+        if (msg.finalContent !== undefined) payload.finalContent = msg.finalContent;
+        text = JSON.stringify(payload);
       }
       sendWSMessage(pending.client, {
         jsonrpc: "2.0",
         id: pending.mcpId,
         result: {
-          content: [{ type: "text", text: JSON.stringify(payload) }],
+          content: [{ type: "text", text }],
         },
       });
     }

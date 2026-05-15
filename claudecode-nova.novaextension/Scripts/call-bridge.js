@@ -3,7 +3,7 @@
  * Direct CLI client for the Claude Code ↔ Nova bridge.
  *
  * The Claude Code CLI only forwards `mcp__ide__getDiagnostics` to the model,
- * so the other 9 MCP tools registered by ws-server.js (getOpenEditors,
+ * so the other 11 MCP tools registered by ws-server.js (getOpenEditors,
  * getCurrentSelection, openFile, openDiff, …) are unreachable from a model
  * conversation. This script connects to the bridge directly via the lock
  * file under `~/.claude/ide/<port>.lock` and invokes any tool by name.
@@ -34,7 +34,9 @@ const TOOLS = [
   "checkDocumentDirty",
   "saveDocument",
   "getDiagnostics",
+  "close_tab",
   "closeAllDiffTabs",
+  "executeCode",
 ];
 
 function usage() {
@@ -45,7 +47,9 @@ function usage() {
     "Examples:\n" +
     "  node call-bridge.js getOpenEditors\n" +
     "  node call-bridge.js getCurrentSelection\n" +
-    "  node call-bridge.js openFile '{\"filePath\":\"/abs/path\",\"lineNumber\":42}'\n"
+    "  node call-bridge.js openFile '{\"filePath\":\"/abs/path\",\"makeFrontmost\":false}'\n" +
+    "  node call-bridge.js openDiff '{\"old_file_path\":\"/abs/a\",\"new_file_path\":\"/abs/a\",\"new_file_contents\":\"...\",\"tab_name\":\"proposed\"}'\n" +
+    "  node call-bridge.js getDiagnostics '{\"uri\":\"file:///abs/path\"}'\n"
   );
 }
 
