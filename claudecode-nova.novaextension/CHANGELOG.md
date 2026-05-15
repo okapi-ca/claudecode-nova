@@ -1,5 +1,65 @@
 # Changelog
 
+## 0.5.0 — 2026-05-15
+
+### Changed
+- **MCP tool schemas now match the VS Code / Neovim `PROTOCOL.md` spec
+  verbatim.** Audited `tools/list` against
+  [coder/claudecode.nvim/PROTOCOL.md](https://github.com/coder/claudecode.nvim/blob/main/PROTOCOL.md)
+  (v0.3.0) and fixed four divergences so Claude Code CLI sends exactly
+  what our bridge expects.
+
+  | Tool | Before | After (spec) |
+  |---|---|---|
+  | `openFile` | `{filePath, lineNumber, selectText}` | `{filePath, preview, startText, endText, selectToEndOfLine, makeFrontmost}` |
+  | `openDiff` | `{filePath, oldContent, newContent, tabName}` | `{old_file_path, new_file_path, new_file_contents, tab_name}` |
+  | `getDiagnostics` | `{filePath}` | `{uri}` |
+  | `closeAllDiffTabs` return | `{success, rejected}` object | `"CLOSED_${N}_DIFF_TABS"` plain string |
+
+- **`openFile` output shape** now follows the spec: a plain `"Opened
+  file: <path>"` string when `makeFrontmost=true` (default), versus the
+  detailed JSON `{success, filePath, languageId, lineCount}` when
+  `makeFrontmost=false`. `preview` is accepted but ignored (Nova has no
+  preview mode).
+- **`openFile` pattern-based selection** — `startText` / `endText` find
+  positions in the document and select that range, optionally extended
+  to end of line via `selectToEndOfLine`. Replaces the ad-hoc
+  `lineNumber` parameter.
+- **`openDiff` diff stats** are now computed against `old_file_path`
+  (the original file on disk) and applied to `new_file_path` on Accept.
+  Best-effort handling of rename-style diffs where the two paths
+  differ.
+- **`getDiagnostics`** returns the spec-shaped envelope
+  `[{uri, diagnostics: []}]`. Always empty — Nova has no LSP /
+  diagnostics public API — but the shape matches what Claude expects to
+  deserialize.
+- **Tool-result wire format** in `ws-server.js` now respects the
+  handler's return type: plain strings flow through verbatim
+  (`"TAB_CLOSED"`, `"FILE_SAVED"`, `"DIFF_REJECTED"`, …), objects are
+  `JSON.stringify`-wrapped, and error results surface via the MCP
+  `isError` flag.
+
+### Added
+- **`close_tab` tool** (`{tab_name}` → `"TAB_CLOSED"`) — Nova has no
+  public close-tab API, so this is an honest no-op that still honors
+  the protocol contract.
+- **`executeCode` tool** (`{code}` → MCP error) — Jupyter kernel
+  execution. Nova doesn't ship a notebook runtime, so the tool surfaces
+  a clear `isError` response (`"executeCode is not supported in Nova
+  (no Jupyter kernel)"`) rather than silently no-op'ing.
+
+### Notes
+- Breaking change for any non-Claude consumer of the bridge's
+  `tools/list`. The only known consumer is Claude Code CLI itself
+  (which sends the spec names), so this should be net positive in
+  practice.
+- `Scripts/call-bridge.js` examples updated to reflect the new param
+  names.
+- No changes to the lock-file format, auth header
+  (`x-claude-code-ide-authorization`), or notification methods
+  (`selection_changed` / `at_mentioned`) — those were already
+  spec-conforming after v0.4.0.
+
 ## 0.4.1 — 2026-05-15
 
 ### Fixed
