@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.1 — 2026-05-15
+
+### Fixed
+- **Sidebar icon now renders in the left sidebar stack** — Nova resolves
+  `sidebars.smallImage` / `sidebars.largeImage` as a *folder* under
+  `Images/` containing `<name>.png`, `<name>@2x.png`, and `metadata.json`
+  with `{"template": true}`. The previous flat PNGs were never detected,
+  so no icon appeared. Replaced with a monochrome anti-aliased "C"
+  template image (Nova tints it per-theme).
+
+### Added
+- **`Scripts/gen-icon.py`** — regenerates the sidebar icon at the four
+  Nova-standard sizes (small 16/32, large 24/48) into the expected
+  folder layout. Pure-stdlib Python (no PIL/cairo), so it runs without
+  external deps. Tweak the `outer` / `inner` / `gap` constants in
+  `render_c()` to adjust the stroke thickness and opening angle.
+
 ## 0.4.0 — 2026-05-07
 
 ### Fixed
