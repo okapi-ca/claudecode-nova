@@ -367,8 +367,14 @@ async function handleToolCall(msg) {
       case "getDiagnostics":
         result = toolGetDiagnostics(args);
         break;
+      case "close_tab":
+        result = toolCloseTab(args);
+        break;
       case "closeAllDiffTabs":
         result = toolCloseAllDiffTabs();
+        break;
+      case "executeCode":
+        result = toolExecuteCode(args);
         break;
       default:
         result = { error: "Unknown tool: " + tool };
@@ -394,25 +400,68 @@ async function handleToolCall(msg) {
 }
 
 // --- openFile ---
+//
+// Schema per PROTOCOL.md: {filePath, preview, startText, endText,
+// selectToEndOfLine, makeFrontmost}. Nova does not expose a real preview
+// mode (`preview` is accepted but ignored — file always opens normally) and
+// openFile() always focuses the new editor, so `makeFrontmost: false` is
+// best-effort and only changes the response shape, not the side effects.
 async function toolOpenFile(args) {
   var filePath = args.filePath;
   if (!filePath) return { error: "filePath is required" };
 
-  try {
-    await nova.workspace.openFile(filePath);
+  var makeFrontmost = args.makeFrontmost !== false;  // default true
+  var startText = args.startText;
+  var endText = args.endText;
+  var selectToEndOfLine = !!args.selectToEndOfLine;
 
-    if (args.lineNumber) {
+  try {
+    var editor = await nova.workspace.openFile(filePath);
+
+    // The openFile() Promise sometimes resolves before the editor is fully
+    // ready — re-fetch from active editor as a safety net.
+    if (!editor || !editor.document || editor.document.path !== filePath) {
       await delay(100);
-      var editor = nova.workspace.activeTextEditor;
-      if (editor && editor.document.path === filePath) {
-        var line = Math.max(0, args.lineNumber - 1);
-        var lineRange = editor.document.getLineRangeForRange(new Range(line, line));
-        editor.selectedRange = new Range(lineRange.start, lineRange.start);
+      editor = nova.workspace.activeTextEditor;
+    }
+
+    // Pattern-based selection (startText … endText). Both required to apply.
+    if (editor && editor.document && startText && endText) {
+      var doc = editor.document;
+      var fullText = doc.getTextInRange(new Range(0, doc.length));
+      var startIdx = fullText.indexOf(startText);
+      var endIdx = startIdx >= 0 ? fullText.indexOf(endText, startIdx + startText.length) : -1;
+      if (startIdx >= 0 && endIdx >= 0) {
+        var selEnd = endIdx + endText.length;
+        if (selectToEndOfLine) {
+          var lineRange = doc.getLineRangeForRange(new Range(selEnd, selEnd));
+          selEnd = lineRange.end;
+        }
+        editor.selectedRange = new Range(startIdx, selEnd);
         editor.scrollToCursorPosition();
       }
     }
 
-    return { success: true, filePath: filePath };
+    if (makeFrontmost) {
+      return "Opened file: " + filePath;
+    }
+
+    // makeFrontmost=false response carries doc metadata. lineCount is computed
+    // by counting LF chars (cheap; same approach as offsetToPosition).
+    var lineCount = 0;
+    if (editor && editor.document) {
+      var text = editor.document.getTextInRange(new Range(0, editor.document.length));
+      lineCount = 1;
+      for (var i = 0; i < text.length; i++) {
+        if (text.charCodeAt(i) === 10) lineCount++;
+      }
+    }
+    return {
+      success: true,
+      filePath: filePath,
+      languageId: (editor && editor.document && editor.document.syntax) || "plaintext",
+      lineCount: lineCount,
+    };
   } catch (err) {
     return { error: err.message };
   }
@@ -420,14 +469,22 @@ async function toolOpenFile(args) {
 
 // --- openDiff ---
 //
+// Schema per PROTOCOL.md: {old_file_path, new_file_path, new_file_contents,
+// tab_name}. Most calls use old_file_path === new_file_path (in-place edit);
+// when they differ, we treat new_file_path as the write target on Accept.
+//
 // Stages the proposed change as a temp file alongside the original, registers
 // it in pendingDiffs so the sidebar can show it, and posts an Accept/Reject
 // notification. Either path (notification button OR sidebar command) ends up
 // calling resolveDiff(diffId, accepted).
 async function toolOpenDiff(args, requestId) {
-  var filePath = args.filePath;
-  var newContent = args.newContent;
-  var tabName = args.tabName;
+  var oldPath = args.old_file_path;
+  var newPath = args.new_file_path || oldPath;
+  var newContent = args.new_file_contents;
+  var tabName = args.tab_name;
+
+  // Internal name: `filePath` is the write target on accept (i.e. new_file_path).
+  var filePath = newPath;
 
   try {
     var tmpDir = nova.path.join(nova.extension.globalStoragePath, "diffs");
@@ -438,13 +495,17 @@ async function toolOpenDiff(args, requestId) {
     file.write(newContent);
     file.close();
 
-    await nova.workspace.openFile(filePath);
+    // Open the original (oldPath) so the user has the "before" tab in view,
+    // then the proposed-changes tmp file. If old/new differ (rename case),
+    // newPath may not exist on disk yet — openFile errors are non-fatal here.
+    try { await nova.workspace.openFile(oldPath); } catch (_) {}
     await nova.workspace.openFile(tmpFile);
 
     // Cheap line-count delta. Not a real LCS diff — just enough so the user
-    // can spot a 200-line rewrite vs. a 3-line tweak at a glance. We read the
-    // original file from disk (best-effort: missing file = new file = all add).
-    var stats = computeDiffStats(filePath, newContent);
+    // can spot a 200-line rewrite vs. a 3-line tweak at a glance. Read the
+    // ORIGINAL file (oldPath) from disk: best-effort, missing file = new file
+    // = all add.
+    var stats = computeDiffStats(oldPath, newContent);
 
     var diffId = "diff_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
     pendingDiffs.unshift({
@@ -628,11 +689,31 @@ async function toolSaveDocument(args) {
 }
 
 // --- getDiagnostics ---
+//
+// Spec returns an array of {uri, diagnostics: [...]} entries. Nova has no
+// LSP/diagnostics public API, so we always return an empty diagnostics list,
+// but with the spec-shaped envelope so Claude's deserialization succeeds.
 function toolGetDiagnostics(args) {
-  return {
-    diagnostics: [],
-    filePath: args.filePath || null,
-  };
+  var uri = args && args.uri ? args.uri : null;
+  return uri ? [{ uri: uri, diagnostics: [] }] : [];
+}
+
+// --- close_tab ---
+//
+// Spec asks for "TAB_CLOSED" on success. Nova has no public close-tab API,
+// so this is a no-op that still reports success — keeps the protocol contract
+// even though the editor tab stays open.
+function toolCloseTab(args) {
+  return "TAB_CLOSED";
+}
+
+// --- executeCode ---
+//
+// Jupyter kernel execution. Nova doesn't ship a notebook runtime, so we
+// surface a clear error rather than silently no-op'ing — Claude will see
+// isError=true and know not to retry.
+function toolExecuteCode(args) {
+  return { error: "executeCode is not supported in Nova (no Jupyter kernel)" };
 }
 
 // --- closeAllDiffTabs ---
@@ -664,7 +745,8 @@ function toolCloseAllDiffTabs() {
     }
   } catch (_) {}
 
-  return { success: true, rejected: rejected };
+  // Spec wire format: plain string "CLOSED_${count}_DIFF_TABS".
+  return "CLOSED_" + rejected + "_DIFF_TABS";
 }
 
 // ---------------------------------------------------------------------------
