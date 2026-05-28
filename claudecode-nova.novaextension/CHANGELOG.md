@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.2 — 2026-05-28
+
+### Added
+- **Configurable Keychain service / account.** Two new settings
+  (`claudecode.chat.keychainService`, `claudecode.chat.keychainAccount`)
+  let users point the chat-key reader at an existing Keychain entry from
+  another app (Claude Desktop, Cline, custom scripts, etc.) instead of
+  duplicating the secret in this extension's namespace. Defaults stay at
+  `ca.okapi.claudecode-nova` / `anthropic-api-key`, matching 0.6.1.
+
+### Changed
+- `Set` and `Clear` Keychain commands now read these config values so
+  they operate on whichever entry is currently selected — and the
+  notification bodies (input prompt, save confirmation, clear
+  confirmation) display the resolved `service` / `account` so the user
+  always sees exactly which entry is being touched. Useful safeguard
+  when pointing at an external app's entry to avoid accidental
+  overwrites or deletions.
+
 ## 0.6.1 — 2026-05-28
 
 ### Added
