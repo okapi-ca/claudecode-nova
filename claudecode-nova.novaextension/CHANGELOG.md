@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.9.0 — 2026-05-28
+
+### Added
+- **CLI subprocess fallback for chat — works without an Anthropic API
+  key.** When no key is resolved (Keychain / 1Password / direct config
+  all empty), chat now spawns the `claude` CLI as a subprocess and
+  parses its `--output-format stream-json` stream. The user's existing
+  Claude Code OAuth session (Pro/Max) authenticates the calls, so chat
+  usage is covered by the subscription instead of being billed against
+  an API key. Detection is automatic — no new setting to configure.
+  Multi-turn continuity is preserved via `--resume <session_id>`.
+- **Chat UI Status sidebar surfaces the active mode.** The descriptive
+  text now reads `SDK · <model>` or `CLI · <model>` so the user can
+  see at a glance which path is active. Tooltip distinguishes
+  "Anthropic SDK — key from <source>" vs "Claude Code CLI session
+  (OAuth Pro/Max — no API key)".
+
+### Changed
+- `startBridge()` no longer disables chat when the API key is missing.
+  It now always passes the chat env vars (`CC_CHAT_ENABLED`,
+  `CC_CHAT_PORT`, `CC_CHAT_MODEL`) plus the new `CC_CLAUDE_PATH` to
+  the ws-server, and only sets `ANTHROPIC_API_KEY` when a key was
+  actually resolved.
+- `ws-server.js` forwards a nullable `apiKey` and the new `claudePath`
+  to `chat-session.init()` — the "key required" guard moved into
+  chat-session itself, which picks the mode based on what it
+  receives.
+
+### Internal
+- `runClaudeCLI()` in `chat-session.mjs` extends `process.env.PATH`
+  with `~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin` when the
+  `claude` binary is referenced by name (Nova's subprocess PATH is
+  trimmed; the CLI is typically installed under one of these dirs).
+- Slash commands and workspace context auto-injection added in 0.8.0
+  apply equally to CLI mode — both call into the same `buildPrompt()`
+  helper before either driver consumes it.
+
+### Limitations
+- In CLI mode the in-process SDK tool wrappers (`chat-tool-wrappers.mjs`)
+  are not exposed to Claude. The `claude` subprocess uses its own MCP
+  bridge if one is reachable in the current Nova session, which is
+  usually the case but is not enforced.
+
 ## 0.8.0 — 2026-05-28
 
 ### Added
