@@ -8,5 +8,8 @@
     "@anthropic-ai/claude-agent-sdk": "^0.3.0",
     "ws": "^8.18.0",
     "zod": "^4.0.0"
+  },
+  "scripts": {
+    "postinstall": "rm -rf node_modules/.bin"
   }
 }
