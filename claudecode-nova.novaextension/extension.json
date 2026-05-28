@@ -10,7 +10,7 @@
   "bugs": "https://github.com/okapi-ca/claudecode-nova/issues",
   "min_runtime": "10.0",
 
-  "main": "Scripts/main.js",
+  "main": "main.js",
 
   "activationEvents": ["*"],
 

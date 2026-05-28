@@ -10,10 +10,10 @@
  *   6. Checks the Claude Code CLI for updates (manual + 24h auto)
  */
 
-const UpdateCheck = require("./update-check.js");
-const { VersionTreeProvider } = require("./version-tree-provider.js");
-const { SessionsTreeProvider, sessionDirForWorkspace } = require("./sessions-tree-provider.js");
-const { ChatStatusTreeProvider } = require("./chat-status-tree-provider.js");
+const UpdateCheck = require("./Scripts/update-check.js");
+const { VersionTreeProvider } = require("./Scripts/version-tree-provider.js");
+const { SessionsTreeProvider, sessionDirForWorkspace } = require("./Scripts/sessions-tree-provider.js");
+const { ChatStatusTreeProvider } = require("./Scripts/chat-status-tree-provider.js");
 
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h auto-check throttle
 
