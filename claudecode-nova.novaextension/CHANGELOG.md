@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.11.1 — 2026-05-28
+
+### Fixed
+- **`nova extension validate` was failing** with
+  `"The package does not have a valid extension.json file."` even
+  though the manifest was syntactically correct. Root cause:
+  `Scripts/node_modules/.bin/` contained two symlinks
+  (`node-which`, `anthropic-ai-sdk`) and Nova's validator does not
+  follow symlinks inside the bundle, which blocked
+  `nova extension publish` entirely. The `.bin/` directory only
+  holds CLI wrappers used by npm scripts at dev time — nothing
+  referenced at runtime by `ws-server.js` or `chat-session.mjs` —
+  so it can be removed unconditionally. Added a `postinstall`
+  script to `Scripts/package.json` that runs
+  `rm -rf node_modules/.bin` after every install, so future
+  `npm install` runs don't reintroduce the validation failure.
+
+### Documentation
+- **README "Roadmap" section was frozen at v0.2.0 / v0.3.0** and
+  hadn't been updated as the extension grew. Replaced with a
+  chronological "Recent Releases" rundown covering v0.6.x through
+  v0.11.0 (Chat UI, slash commands, CLI fallback, Nova Preview
+  docking, model picker / thinking stream) plus a "Future ideas"
+  section.
+
 ## 0.11.0 — 2026-05-28
 
 ### Added
