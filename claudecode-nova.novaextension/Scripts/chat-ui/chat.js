@@ -15,14 +15,19 @@ const statusText   = $("status-text");
 const emptyState   = $("empty-state");
 const metaSess     = $("meta-session");
 const metaCost     = $("meta-cost");
+const metaMode     = $("meta-mode");
 const slashMenuEl  = $("slash-menu");
 const injectCtxEl  = $("inject-context");
+const modelPicker  = $("model-picker");
 
 let ws = null;
 let inFlight = false;
 let currentAssistantBubble = null;
 let currentAssistantBuffer = "";
 let toolCardsByName = []; // queue of cards waiting for a matching tool_result
+let currentThinkingBody = null;
+let currentThinkingBuffer = "";
+let currentPendingEl = null; // pre-content "Claude is thinking…" placeholder
 
 // Slash commands available from the composer. The `cmd` value is sent
 // to the backend, which maps it to a templated prompt. The `desc` is
@@ -135,11 +140,101 @@ function ensureAssistantBubble() {
 }
 
 function appendAssistantText(chunk) {
+  removePendingPlaceholder();
+  // Any text means thinking is over — collapse it so the actual response
+  // isn't visually crowded.
+  if (currentThinkingBody) collapseCurrentThinking();
+  // First text chunk after a tool / init transitions the status bar
+  // so the user sees Claude is now generating the reply rather than
+  // sitting on an opaque "working…" state.
+  if (!currentAssistantBubble) {
+    setStatus("thinking", "Writing response…");
+  }
   const body = ensureAssistantBubble();
   currentAssistantBuffer += chunk;
   body.innerHTML = renderMarkdown(currentAssistantBuffer);
   highlightCodeBlocks(body);
   scrollToBottom();
+}
+
+// ── thinking block (collapsible "💭 Reasoning…") ──────────────────
+
+function ensureThinkingBlock() {
+  if (currentThinkingBody) return currentThinkingBody;
+  removePendingPlaceholder();
+  hideEmptyState();
+  // Reset any text bubble so the thinking is visually distinct
+  currentAssistantBubble = null;
+  currentAssistantBuffer = "";
+
+  const wrap = document.createElement("div");
+  wrap.className = "thinking expanded";
+  wrap.innerHTML = `
+    <div class="thinking__header" role="button" title="Claude's internal reasoning — click to collapse">
+      <span class="thinking__spinner"></span>
+      <span class="thinking__icon">💭</span>
+      <span class="thinking__label">Reasoning…</span>
+      <span class="thinking__caret">▼</span>
+    </div>
+    <div class="thinking__body"></div>
+  `;
+  wrap.querySelector(".thinking__header").addEventListener("click", () => {
+    wrap.classList.toggle("expanded");
+    const caret = wrap.querySelector(".thinking__caret");
+    if (caret) caret.textContent = wrap.classList.contains("expanded") ? "▼" : "▶";
+  });
+  chatEl.appendChild(wrap);
+  currentThinkingBody = wrap.querySelector(".thinking__body");
+  currentThinkingBuffer = "";
+  setStatus("thinking", "Thinking aloud…");
+  return currentThinkingBody;
+}
+
+function appendThinking(chunk) {
+  const body = ensureThinkingBlock();
+  currentThinkingBuffer += chunk;
+  // Plain text, line-broken — no markdown rendering for raw thoughts
+  body.textContent = currentThinkingBuffer;
+  scrollToBottom();
+}
+
+function collapseCurrentThinking() {
+  if (!currentThinkingBody) return;
+  const wrap = currentThinkingBody.closest(".thinking");
+  if (wrap) {
+    wrap.classList.remove("expanded");
+    wrap.classList.add("done");
+    const label = wrap.querySelector(".thinking__label");
+    if (label) label.textContent = "Reasoning";
+    const caret = wrap.querySelector(".thinking__caret");
+    if (caret) caret.textContent = "▶";
+  }
+  currentThinkingBody = null;
+  currentThinkingBuffer = "";
+}
+
+// ── pre-content placeholder (visible while waiting for first delta) ─
+
+function showPendingPlaceholder() {
+  if (currentPendingEl) return;
+  hideEmptyState();
+  const el = document.createElement("div");
+  el.className = "pending";
+  el.innerHTML = `
+    <span class="pending__dot"></span>
+    <span class="pending__dot"></span>
+    <span class="pending__dot"></span>
+    <span class="pending__label">Claude is thinking…</span>
+  `;
+  chatEl.appendChild(el);
+  currentPendingEl = el;
+  scrollToBottom();
+}
+
+function removePendingPlaceholder() {
+  if (!currentPendingEl) return;
+  currentPendingEl.remove();
+  currentPendingEl = null;
 }
 
 function appendToolCard(name, input) {
@@ -149,14 +244,15 @@ function appendToolCard(name, input) {
   currentAssistantBuffer = "";
 
   const card = document.createElement("div");
-  card.className = "tool";
+  card.className = "tool tool--running"; // 'running' state until tool_result arrives
   const summary = Object.keys(input).length
     ? JSON.stringify(input)
     : "(no args)";
+  const pretty = prettyToolName(name);
   card.innerHTML = `
     <div class="tool__header" role="button">
-      <span class="tool__icon"></span>
-      <span class="tool__name">${escapeHtml(prettyToolName(name))}</span>
+      <span class="tool__spinner" aria-label="running" title="Tool is running"></span>
+      <span class="tool__name">${escapeHtml(pretty)}</span>
       <span class="tool__summary">${escapeHtml(summary)}</span>
       <span class="tool__caret">▶</span>
     </div>
@@ -167,6 +263,9 @@ function appendToolCard(name, input) {
       <pre class="tool__pre tool__result" hidden></pre>
     </div>
   `;
+
+  // Status reflects the active tool
+  setStatus("thinking", "Using " + pretty + "…");
   card.querySelector(".tool__header").addEventListener("click", () => {
     card.classList.toggle("expanded");
   });
@@ -181,6 +280,8 @@ function attachToolResult(name, text, isError) {
   const target = idx >= 0 ? toolCardsByName.splice(idx, 1)[0].card : null;
   if (!target) return;
 
+  // Stop the spinner / running state — result is in.
+  target.classList.remove("tool--running");
   if (isError) target.classList.add("error");
 
   const label = target.querySelector(".tool__result-label");
@@ -188,6 +289,10 @@ function attachToolResult(name, text, isError) {
   label.hidden = false;
   pre.hidden = false;
   pre.textContent = text;
+
+  // Briefly reflect the post-tool processing step in the status bar.
+  // Will be overwritten by the next assistant_text or result event.
+  setStatus("thinking", "Processing result…");
 }
 
 function prettyToolName(name) {
@@ -238,15 +343,46 @@ function connect() {
 function handleServerMessage(msg) {
   switch (msg.type) {
     case "session_started":
-      metaSess.textContent = `session ${msg.sessionId.slice(0, 8)}… · model ${msg.model}`;
-      setStatus("thinking", "Claude is working…");
+      metaSess.textContent = `session ${msg.sessionId.slice(0, 8)}…`;
+      // Show the auth/runtime mode badge — CLI uses the Claude Code
+      // OAuth session (no API key, covered by subscription); SDK uses
+      // ANTHROPIC_API_KEY and bills per-call. The user wants this
+      // distinction visible at a glance because it determines whether
+      // the cost figure below is billable or informative.
+      if (metaMode) {
+        if (msg.mode === "cli") {
+          metaMode.textContent = "CLI";
+          metaMode.title = "Claude Code OAuth session — covered by subscription";
+          metaMode.className = "meta-mode meta-mode--cli";
+          metaMode.hidden = false;
+        } else if (msg.mode === "sdk") {
+          metaMode.textContent = "SDK";
+          metaMode.title = "Anthropic API key — billed per token";
+          metaMode.className = "meta-mode meta-mode--sdk";
+          metaMode.hidden = false;
+        }
+      }
+      // Sync the picker to the model the backend actually started with —
+      // it may differ from the picker's default if the user configured
+      // something else in extension settings. Don't fire `change`.
+      if (msg.model && modelPicker) {
+        modelPicker.value = stripModelSuffix(msg.model);
+      }
+      setStatus("thinking", "Thinking…");
       break;
 
     case "assistant_text":
       appendAssistantText(msg.chunk);
       break;
 
+    case "assistant_thinking":
+      removePendingPlaceholder();
+      appendThinking(msg.chunk);
+      break;
+
     case "assistant_tool_use":
+      removePendingPlaceholder();
+      if (currentThinkingBody) collapseCurrentThinking();
       appendToolCard(msg.name, msg.input);
       break;
 
@@ -261,6 +397,8 @@ function handleServerMessage(msg) {
       sendBtn.disabled = false;
       currentAssistantBubble = null;
       currentAssistantBuffer = "";
+      removePendingPlaceholder();
+      if (currentThinkingBody) collapseCurrentThinking();
       if (msg.success && msg.cost != null) {
         const tk = msg.tokens
           ? ` · in ${msg.tokens.input} / out ${msg.tokens.output} tk`
@@ -277,6 +415,8 @@ function handleServerMessage(msg) {
       inFlight = false;
       abortBtn.hidden = true;
       sendBtn.disabled = false;
+      removePendingPlaceholder();
+      if (currentThinkingBody) collapseCurrentThinking();
       break;
   }
 }
@@ -317,6 +457,11 @@ function sendUserMessage() {
   sendBtn.disabled = true;
   abortBtn.hidden = false;
   setStatus("thinking", "Sending…");
+
+  // Show a pulsing placeholder until the first content delta arrives.
+  // The CLI's first delta can take 2-5s on cold context; without this
+  // the chat appears frozen.
+  showPendingPlaceholder();
 }
 
 // ── slash-command menu ────────────────────────────────────────────
@@ -428,6 +573,20 @@ document.querySelectorAll(".suggestion").forEach((btn) => {
     sendUserMessage();
   });
 });
+
+if (modelPicker) {
+  modelPicker.addEventListener("change", () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "set_model", model: modelPicker.value }));
+  });
+}
+
+// The CLI's init event sometimes returns the model with a "[1m]" suffix
+// (e.g. "claude-opus-4-8[1m]"). The picker stores the plain ID — strip
+// the suffix before assigning so the option stays selected.
+function stripModelSuffix(m) {
+  return m.replace(/\[[^\]]+\]$/, "");
+}
 
 // ── boot ──────────────────────────────────────────────────────────
 

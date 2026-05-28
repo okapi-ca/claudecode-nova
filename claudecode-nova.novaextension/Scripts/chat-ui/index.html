@@ -36,8 +36,18 @@
 
   <footer class="composer">
     <div class="composer__meta" id="meta">
+      <span id="meta-mode" class="meta-mode" hidden></span>
       <span id="meta-session"></span>
       <span id="meta-cost"></span>
+      <label class="composer__model" title="Model used for the next message (no restart needed)">
+        <span class="composer__model-label">Model</span>
+        <select id="model-picker">
+          <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+          <option value="claude-haiku-4-5">Haiku 4.5</option>
+          <option value="claude-opus-4-7">Opus 4.7</option>
+          <option value="claude-opus-4-8">Opus 4.8 (1M)</option>
+        </select>
+      </label>
       <label class="composer__toggle" title="Prepend your current file + selection to every prompt">
         <input type="checkbox" id="inject-context" checked />
         <span>Auto-inject context</span>

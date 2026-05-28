@@ -479,3 +479,184 @@ body {
 .composer__toggle input { margin: 0; }
 
 .composer__meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* ── tool running state (spinner replaces the static icon) ─────── */
+
+.tool__spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--accent-warm);
+}
+
+.tool--running .tool__spinner {
+  background: transparent;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: var(--accent-warm);
+  animation: tool-spin 0.8s linear infinite;
+  box-sizing: border-box;
+}
+
+.tool--running .tool__header {
+  /* Subtle pulsing background so the active tool stands out
+     even when collapsed and the user is scrolled away. */
+  animation: tool-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes tool-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes tool-pulse {
+  0%, 100% { background: var(--tool-bg); }
+  50%      { background: color-mix(in srgb, var(--accent-warm) 12%, var(--tool-bg)); }
+}
+
+/* ── model picker ───────────────────────────────────────────────── */
+
+.composer__model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.composer__model-label {
+  user-select: none;
+}
+
+#model-picker {
+  background: #25252b;
+  color: var(--fg);
+  border: 1px solid #3a3a42;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+#model-picker:hover  { border-color: #4a4a55; }
+#model-picker:focus  { outline: none; border-color: var(--accent); }
+
+/* ── mode badge (CLI vs SDK) ────────────────────────────────────── */
+
+.meta-mode {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: help;
+  user-select: none;
+}
+
+.meta-mode--cli {
+  background: rgba(92, 200, 120, 0.18);
+  color: #6ed68a;
+  border: 1px solid rgba(92, 200, 120, 0.4);
+}
+
+.meta-mode--sdk {
+  background: rgba(120, 160, 255, 0.18);
+  color: #9bb9ff;
+  border: 1px solid rgba(120, 160, 255, 0.4);
+}
+
+/* ── thinking block (collapsible reasoning stream) ──────────────── */
+
+.thinking {
+  border: 1px solid #3a3a42;
+  border-radius: var(--radius, 6px);
+  margin: 8px 0;
+  background: rgba(255, 200, 80, 0.04);
+  overflow: hidden;
+}
+
+.thinking__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: #e8c87a;
+}
+
+.thinking__header:hover { background: rgba(255, 200, 80, 0.08); }
+
+.thinking__spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid rgba(232, 200, 122, 0.25);
+  border-top-color: #e8c87a;
+  animation: tool-spin 0.8s linear infinite;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.thinking.done .thinking__spinner {
+  border: 0;
+  background: #e8c87a;
+  animation: none;
+}
+
+.thinking__icon { font-size: 14px; }
+.thinking__label { flex: 1; }
+.thinking__caret { color: #8a8a92; }
+
+.thinking__body {
+  display: none;
+  padding: 8px 12px 12px 30px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  color: #b0a07a;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  border-top: 1px solid rgba(58, 58, 66, 0.6);
+}
+
+.thinking.expanded .thinking__body { display: block; }
+
+/* ── pre-content pending placeholder (3 pulsing dots) ───────────── */
+
+.pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  margin: 8px 0;
+  border-radius: var(--radius, 6px);
+  background: rgba(120, 160, 255, 0.08);
+  border: 1px solid rgba(120, 160, 255, 0.2);
+  align-self: flex-start;
+  font-size: 12px;
+  color: #9bb9ff;
+}
+
+.pending__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pending-bounce 1.2s ease-in-out infinite;
+}
+
+.pending__dot:nth-child(2) { animation-delay: 0.15s; }
+.pending__dot:nth-child(3) { animation-delay: 0.3s; }
+
+.pending__label { margin-left: 4px; }
+
+@keyframes pending-bounce {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.85); }
+  40%           { opacity: 1;   transform: scale(1); }
+}

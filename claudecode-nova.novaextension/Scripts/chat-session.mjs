@@ -48,7 +48,14 @@ const MIME = {
  * @param {Function} opts.log            (level, msg, data?) → void
  */
 export async function init(opts) {
-  const { port, apiKey, model = "claude-sonnet-4-6", callNovaTool, log, claudePath } = opts;
+  const { port, apiKey, model: initialModel = "claude-sonnet-4-6", callNovaTool, log, claudePath } = opts;
+
+  // The currently-active model. Starts from the value `init()` was called
+  // with (read by main.js from claudecode.chat.model), can be flipped at
+  // runtime by a {type:"set_model"} message from the chat UI's picker.
+  // Each user_message uses whatever is current at submission time, so the
+  // user can A/B between Sonnet and Opus mid-conversation.
+  let model = initialModel;
 
   // Two execution modes :
   //   - "sdk" : use @anthropic-ai/claude-agent-sdk with ANTHROPIC_API_KEY.
@@ -204,11 +211,32 @@ export async function init(opts) {
           // Map CLI events → frontend wire format.
           if (evt.type === "system" && evt.subtype === "init") {
             capturedSessionId = evt.session_id;
-            send({ type: "session_started", sessionId: evt.session_id, model: evt.model ?? model });
+            send({ type: "session_started", sessionId: evt.session_id, model: evt.model ?? model, mode: "cli" });
           } else if (evt.type === "stream_event" && evt.event?.type === "content_block_delta") {
             const delta = evt.event.delta;
             if (delta?.type === "text_delta" && typeof delta.text === "string") {
               send({ type: "assistant_text", chunk: delta.text });
+            } else if (delta?.type === "thinking_delta" && typeof delta.thinking === "string") {
+              send({ type: "assistant_thinking", chunk: delta.thinking });
+            }
+          } else if (evt.type === "assistant" && Array.isArray(evt.message?.content)) {
+            // Top-level assistant events carry committed message content,
+            // including tool_use blocks. The stream_event deltas don't
+            // include tool_use input directly, so we rely on this path
+            // for tool-card display.
+            for (const block of evt.message.content) {
+              if (block?.type === "tool_use") {
+                send({ type: "assistant_tool_use", name: block.name, input: block.input || {} });
+              }
+            }
+          } else if (evt.type === "user" && Array.isArray(evt.message?.content)) {
+            for (const block of evt.message.content) {
+              if (block?.type === "tool_result") {
+                const text = Array.isArray(block.content)
+                  ? block.content.map((c) => c.text ?? "").join("")
+                  : (block.content ?? "");
+                send({ type: "tool_result", name: block.name ?? "unknown", text, isError: !!block.is_error });
+              }
             }
           } else if (evt.type === "result") {
             lastCost = evt.total_cost_usd ?? null;
@@ -286,6 +314,14 @@ export async function init(opts) {
         return;
       }
 
+      if (msg.type === "set_model" && typeof msg.model === "string") {
+        if (msg.model !== model) {
+          log("info", `chat: switching model ${model} → ${msg.model}`);
+          model = msg.model;
+        }
+        return;
+      }
+
       if (msg.type !== "user_message" || typeof msg.text !== "string") {
         send({ type: "error", message: "unsupported message type" });
         return;
@@ -350,13 +386,14 @@ export async function init(opts) {
             case "system":
               if (event.subtype === "init") {
                 if (!currentSessionId) currentSessionId = event.session_id;
-                send({ type: "session_started", sessionId: event.session_id, model: event.model ?? model });
+                send({ type: "session_started", sessionId: event.session_id, model: event.model ?? model, mode: "sdk" });
               }
               break;
             case "assistant": {
               const content = event.message?.content ?? [];
               for (const block of content) {
                 if (block.type === "text") send({ type: "assistant_text", chunk: block.text });
+                else if (block.type === "thinking" && typeof block.thinking === "string") send({ type: "assistant_thinking", chunk: block.thinking });
                 else if (block.type === "tool_use") send({ type: "assistant_tool_use", name: block.name, input: block.input });
               }
               break;
