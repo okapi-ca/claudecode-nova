@@ -347,9 +347,10 @@ function runOpRead(ref) {
   });
 }
 
-// "Open Claude Chat in Browser" command — shows the chat URL with copy and
-// browser-open actions. Guides the user to configure Nova Project Settings
-// (Preview URL) so the chat can live inside Nova's Preview tab.
+// "Open Claude Chat in Browser" command — surfaces the chat URL with
+// three opening modes: copy to clipboard, open in default browser, or
+// open inside Nova as a previewable HTML wrapper (which the user can
+// then split-right via Cmd+Shift+H or drag-to-side).
 function openChatHandler() {
   if (!nova.config.get("claudecode.chat.enabled")) {
     nova.workspace.showActionPanel(
@@ -366,23 +367,99 @@ function openChatHandler() {
   const url  = "http://127.0.0.1:" + port + "/";
 
   nova.workspace.showActionPanel(
-    "Claude Chat UI\n\n" + url + "\n\nTo use inside Nova's Preview tab, configure\nProject Settings → Web → Preview URL to the URL above.",
-    { buttons: ["Copy URL", "Open in Browser", "Close"] },
+    "Claude Chat UI\n\n" + url + "\n\nOpen in Nova creates a previewable wrapper file you can split to the right; press Cmd+Shift+H to preview or right-click the tab → Split Right.",
+    { buttons: ["Open in Nova Preview", "Open in Browser", "Copy URL", "Close"] },
     function(idx) {
       if (idx === 0) {
-        nova.clipboard.writeText(url);
-        showNotification("Copied", url + " is in your clipboard.");
+        openChatInNovaPreview(url);
       } else if (idx === 1) {
-        // Best-effort: spawn `open <url>` (macOS) to launch the default browser.
         try {
           const proc = new Process("/usr/bin/open", { args: [url], stdio: "ignore" });
           proc.start();
         } catch (err) {
           showNotification("Cannot open browser", err.message);
         }
+      } else if (idx === 2) {
+        nova.clipboard.writeText(url);
+        showNotification("Copied", url + " is in your clipboard.");
       }
     },
   );
+}
+
+// Write a tiny HTML wrapper that iframes the chat URL, then open it as
+// a Nova editor tab. Nova's Preview tab (Cmd+Shift+H) renders this via
+// WebKit, giving a chat panel inside Nova. Stored under the extension's
+// global storage so it survives Nova restarts and doesn't pollute the
+// workspace tree.
+//
+// We only (re)generate the file when it's missing OR when the configured
+// chat URL no longer matches the URL embedded in the existing copy —
+// otherwise the user is free to tweak styles / title / etc. and their
+// edits are preserved across re-opens.
+function openChatInNovaPreview(url) {
+  const storage = nova.extension.globalStoragePath;
+  try { nova.fs.mkdir(storage); } catch (_) {} // ignore EEXIST
+  const wrapperPath = nova.path.join(storage, "chat-frame.html");
+
+  if (!isChatWrapperFresh(wrapperPath, url)) {
+    try {
+      const file = nova.fs.open(wrapperPath, "w");
+      file.write(buildChatWrapperHtml(url));
+      file.close();
+    } catch (err) {
+      showNotification("Cannot write chat wrapper", err.message);
+      return;
+    }
+  }
+
+  nova.workspace.openFile(wrapperPath).then(function() {
+    showNotification(
+      "Chat wrapper opened",
+      "Press Cmd+Shift+H to show the Preview, then drag the Preview tab to the right to dock it. The chat is at " + url + "."
+    );
+  }, function(err) {
+    showNotification("Cannot open chat wrapper", err.message);
+  });
+}
+
+function buildChatWrapperHtml(url) {
+  return [
+    "<!doctype html>",
+    "<html lang=\"en\">",
+    "<head>",
+    "  <meta charset=\"utf-8\" />",
+    "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />",
+    "  <title>Claude Chat</title>",
+    "  <style>",
+    "    html, body { margin: 0; padding: 0; height: 100%; background: #1e1e1e; }",
+    "    iframe { width: 100%; height: 100%; border: 0; display: block; }",
+    "  </style>",
+    "</head>",
+    "<body>",
+    "  <iframe src=\"" + url + "\" allow=\"clipboard-read; clipboard-write\"></iframe>",
+    "</body>",
+    "</html>",
+  ].join("\n");
+}
+
+// True if the wrapper file exists AND still references `url`. Lets the
+// user customize the HTML freely without us overwriting their edits at
+// every "Open in Nova Preview" click. Returns false when the file is
+// missing, unreadable, or points at a different URL (port change etc.) —
+// caller will rewrite from the template in those cases.
+function isChatWrapperFresh(path, url) {
+  let file;
+  try { file = nova.fs.open(path, "r"); }
+  catch (_) { return false; } // missing
+  try {
+    const content = file.read();
+    return typeof content === "string" && content.indexOf("src=\"" + url + "\"") !== -1;
+  } catch (_) {
+    return false;
+  } finally {
+    try { file.close(); } catch (_) {}
+  }
 }
 
 // ---------------------------------------------------------------------------
