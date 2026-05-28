@@ -12,6 +12,7 @@
 
 const UpdateCheck = require("./Scripts/update-check.js");
 const { VersionTreeProvider } = require("./Scripts/version-tree-provider.js");
+const { SessionsTreeProvider, sessionDirForWorkspace } = require("./Scripts/sessions-tree-provider.js");
 
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h auto-check throttle
 
@@ -85,6 +86,8 @@ exports.activate = function() {
       nova.commands.register("claudecode.diffReject", diffRejectHandler),
       nova.commands.register("claudecode.diffShowDetails", diffShowDetailsHandler),
       nova.commands.register("claudecode.sidebarRefresh", sidebarRefreshHandler),
+      nova.commands.register("claudecode.sessionsRefresh", sessionsRefreshHandler),
+      nova.commands.register("claudecode.resumeSession", resumeSessionHandler),
       nova.commands.register("claudecode.checkForUpdates", function() { checkForUpdates(false); }),
       nova.commands.register("claudecode.openChat", openChatHandler),
       nova.commands.register("claudecode.setChatApiKey", setChatApiKeyHandler),
@@ -1258,6 +1261,9 @@ var diffsProvider = null;
 var diffsTree = null;
 var activityProvider = null;
 var activityTree = null;
+var sessionsProvider = null;
+var sessionsTree = null;
+var sessionsWatcher = null;
 
 function updateSidebar() {
   try {
@@ -1297,8 +1303,51 @@ function ensureActivitySidebars() {
       });
       disposables.push(versionTree);
     }
+    if (!sessionsProvider) {
+      sessionsProvider = new SessionsTreeProvider();
+      try { sessionsProvider.refresh(); }
+      catch (e) { console.warn("Claude Code Bridge: initial sessions scan failed:", e.message); }
+      sessionsTree = new TreeView("claudecode.sidebar.sessions", {
+        dataProvider: sessionsProvider,
+      });
+      disposables.push(sessionsTree);
+      startSessionsWatcher();
+    }
   } catch (err) {
     console.error("Claude Code Bridge: activity sidebar init failed:", err.message);
+  }
+}
+
+// Watch the per-workspace session directory so the sidebar updates when
+// Claude Code creates a new session or appends to an existing one. fs.watch
+// is debounced via a short timer because a single Claude turn appends many
+// JSONL events in quick succession.
+var sessionsRefreshTimer = null;
+function startSessionsWatcher() {
+  if (sessionsWatcher) return;
+  var dir = sessionDirForWorkspace();
+  if (!dir) return;
+  try {
+    sessionsWatcher = nova.fs.watch(dir + "/*.jsonl", function() {
+      if (sessionsRefreshTimer) return;
+      sessionsRefreshTimer = setTimeout(function() {
+        sessionsRefreshTimer = null;
+        refreshSessionsSidebar();
+      }, 500);
+    });
+    disposables.push(sessionsWatcher);
+  } catch (err) {
+    console.warn("Claude Code Bridge: sessions watcher failed:", err.message);
+  }
+}
+
+function refreshSessionsSidebar() {
+  if (!sessionsProvider || !sessionsTree) return;
+  try {
+    sessionsProvider.refresh();
+    sessionsTree.reload();
+  } catch (err) {
+    console.error("Claude Code Bridge: sessions refresh failed:", err.message);
   }
 }
 
@@ -1733,6 +1782,34 @@ function activityClearHandler() {
 function sidebarRefreshHandler() {
   updateSidebar();
   refreshActivitySidebar();
+  refreshSessionsSidebar();
+}
+
+function sessionsRefreshHandler() {
+  refreshSessionsSidebar();
+}
+
+// Triggered by double-click on a Recent Sessions tree item. Reads the
+// selected sessionId from the tree's selection, builds the resume command
+// honouring the workspace's `claudecode.claudeCommand` setting, and copies
+// it to the clipboard. We don't launch a terminal here — Nova has no
+// programmatic terminal API, so the user pastes into whatever shell they're
+// already using (Project Terminal, iTerm, etc.).
+function resumeSessionHandler() {
+  if (!sessionsTree) return;
+  var sel = sessionsTree.selection;
+  if (!sel || sel.length === 0) return;
+  var element = sel[0];
+  if (!element || !element.sessionId) return;
+
+  var claudeCmd = nova.workspace.config.get("claudecode.claudeCommand") || "claude";
+  var resumeCmd = claudeCmd + " --resume " + element.sessionId;
+  try {
+    nova.clipboard.writeText(resumeCmd);
+    showNotification("Copied", "Resume command copied to clipboard:\n" + resumeCmd);
+  } catch (err) {
+    showNotification("Copy failed", err.message);
+  }
 }
 
 // ---------------------------------------------------------------------------

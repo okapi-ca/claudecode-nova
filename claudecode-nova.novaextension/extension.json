@@ -135,6 +135,19 @@
           ]
         },
         {
+          "id": "claudecode.sidebar.sessions",
+          "name": "Recent Sessions",
+          "placeholderText": "No saved sessions for this workspace.",
+          "headerCommands": [
+            {
+              "title": "Refresh",
+              "image": "__builtin.refresh",
+              "command": "claudecode.sessionsRefresh",
+              "tooltip": "Rescan ~/.claude/projects for this workspace"
+            }
+          ]
+        },
+        {
           "id": "claudecode.sidebar.version",
           "name": "Claude Code Version",
           "placeholderText": "Checking…",
