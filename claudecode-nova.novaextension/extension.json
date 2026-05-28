@@ -3,7 +3,7 @@
   "name": "Claude Code Bridge",
   "organization": "okapi-ca",
   "description": "Integrates Claude Code CLI with Nova via the WebSocket MCP protocol, providing context sharing, diff viewing, and selection tracking.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "categories": ["commands", "sidebars"],
   "license": "MIT",
   "repository": "https://github.com/okapi-ca/claudecode-nova",

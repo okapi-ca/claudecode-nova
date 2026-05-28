@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.8.0 — 2026-05-28
+
+### Added
+- **Slash commands in the chat UI.** Typing `/` in the composer
+  opens a filterable menu of templated prompts — `/explain`,
+  `/refactor`, `/test`, `/doc`, `/fix`. Navigate with `↑`/`↓`,
+  pick with `Enter`/`Tab`, cancel with `Esc`. The selected
+  command is rendered as a prefix in the transcript so past
+  turns stay readable. Each command maps to a server-side
+  template (see `SLASH_TEMPLATES` in `chat-session.mjs`) that
+  expands into a structured prompt.
+- **Workspace context auto-injection.** A new "Auto-inject
+  context" toggle (on by default) appears in the chat meta bar.
+  When active, every prompt automatically prepends the user's
+  current Nova selection plus file path, formatted as a markdown
+  block — Claude no longer has to ask "what are you looking at?".
+  Backend calls `getCurrentSelection` via the existing Nova tool
+  plumbing, falls back gracefully on empty selection or lookup
+  failure. The toggle is per-session; turn it off for general
+  questions unrelated to your current code.
+- **Composition: slash commands run on the current selection
+  with zero typing.** Pick `/explain`, hit Enter twice → Claude
+  explains the highlighted code in detail.
+
+### Changed
+- Chat composer textarea is now wrapped in a positioning
+  container so the slash menu can float above it. The wrap
+  preserves full-width layout via `display: flex` +
+  `min-width: 0` + `box-sizing: border-box` on the inner
+  textarea.
+
 ## 0.7.0 — 2026-05-28
 
 ### Added
