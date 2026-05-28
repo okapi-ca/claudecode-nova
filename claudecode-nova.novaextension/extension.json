@@ -162,8 +162,8 @@
         },
         {
           "id": "claudecode.sidebar.chat",
-          "name": "Chat UI",
-          "placeholderText": "Chat UI is disabled. Enable in settings.",
+          "name": "Chat UI Status",
+          "placeholderText": "Chat UI status loading…",
           "headerCommands": [
             {
               "title": "Open",

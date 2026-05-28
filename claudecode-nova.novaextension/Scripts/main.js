@@ -13,6 +13,7 @@
 const UpdateCheck = require("./update-check.js");
 const { VersionTreeProvider } = require("./version-tree-provider.js");
 const { SessionsTreeProvider, sessionDirForWorkspace } = require("./sessions-tree-provider.js");
+const { ChatStatusTreeProvider } = require("./chat-status-tree-provider.js");
 
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h auto-check throttle
 
@@ -63,6 +64,21 @@ let versionState = {
 let versionProvider = null;
 let versionTree = null;
 let updateInProgress = false;
+
+// Chat UI (Mode B) lifecycle state. Mutated by startBridge() and the
+// chat_started / chat_failed messages from ws-server.js. The same object
+// is shared with ChatStatusTreeProvider.
+let chatState = {
+  state: "disabled",         // disabled | no_key | starting | running | failed | stopped
+  port: null,
+  model: null,
+  apiKeySource: null,        // "keychain" | "1password" | "config"
+  lastError: null,
+  url: null,
+  lastUpdatedAt: null,
+};
+let chatStatusProvider = null;
+let chatStatusTree = null;
 
 // ---------------------------------------------------------------------------
 // Lifecycle
@@ -193,6 +209,17 @@ function chatKeychainAccount() {
 //   2. 1Password CLI (op read — requires active `op signin` session)
 //   3. Plain-text config value (last-resort fallback)
 // Returns the key, or empty string if no source yields one.
+// Determine which source resolveChatApiKey() would pick — used by the
+// Chat UI Status sidebar so the user can see where the key came from
+// without exposing the key itself. Order matches resolveChatApiKey.
+async function detectChatApiKeySource() {
+  const kc = await readChatKeyFromKeychain();
+  if (kc) return "keychain";
+  if ((nova.config.get("claudecode.chat.apiKey1PassRef") || "").trim()) return "1password";
+  if ((nova.config.get("claudecode.chat.apiKey") || "").trim()) return "config";
+  return null;
+}
+
 async function resolveChatApiKey() {
   // 1) Keychain — preferred (set via the "Set Claude Chat API Key" command)
   const kc = await readChatKeyFromKeychain();
@@ -398,8 +425,19 @@ async function startBridge() {
         env.CC_CHAT_MODEL   = nova.config.get("claudecode.chat.model") || "claude-sonnet-4-6";
         env.ANTHROPIC_API_KEY = apiKey;
         console.log("Claude Code Bridge: chat enabled, port " + env.CC_CHAT_PORT + ", model " + env.CC_CHAT_MODEL);
+
+        chatState.state = "starting";
+        chatState.port = parseInt(env.CC_CHAT_PORT, 10) || 5180;
+        chatState.model = env.CC_CHAT_MODEL;
+        chatState.apiKeySource = await detectChatApiKeySource();
+        chatState.lastError = null;
+        chatState.url = "http://127.0.0.1:" + chatState.port + "/";
+        refreshChatStatusSidebar();
       } else {
         console.warn("Claude Code Bridge: chat enabled but no API key resolved — chat will be disabled");
+        chatState.state = "no_key";
+        chatState.lastError = null;
+        refreshChatStatusSidebar();
         showNotification(
           "Chat key missing",
           "Chat UI is enabled but no Anthropic API key was found.\nConfigure 'Anthropic API Key — 1Password reference' or the direct key in Extension Settings."
@@ -407,7 +445,13 @@ async function startBridge() {
       }
     } catch (err) {
       console.error("Claude Code Bridge: chat API key resolution failed:", err.message);
+      chatState.state = "failed";
+      chatState.lastError = err.message;
+      refreshChatStatusSidebar();
     }
+  } else {
+    chatState.state = "disabled";
+    refreshChatStatusSidebar();
   }
 
   try {
@@ -454,6 +498,13 @@ async function startBridge() {
     clientCount = 0;
     stdoutBuffer = "";
     updateSidebar();
+    // Chat lives inside the ws-server subprocess — if the subprocess died,
+    // chat is gone too. Only downgrade to "stopped" if we hadn't already
+    // recorded a more specific failure (chat_failed sets "failed").
+    if (chatState.state !== "disabled" && chatState.state !== "failed") {
+      chatState.state = "stopped";
+      refreshChatStatusSidebar();
+    }
     if (exitCode !== 0) {
       showNotification("Server Stopped", "WebSocket server exited with code " + exitCode + ". Check Extension Console for details.");
     }
@@ -569,14 +620,22 @@ function handleServerMessage(msg) {
 
     case "chat_started":
       console.log("Claude Code Bridge: chat server started on port " + msg.port);
+      chatState.state = "running";
+      chatState.port = msg.port || chatState.port;
+      chatState.url = "http://127.0.0.1:" + chatState.port + "/";
+      chatState.lastError = null;
+      refreshChatStatusSidebar();
       showNotification(
         "Chat UI ready",
-        "Claude chat is live at http://127.0.0.1:" + msg.port + "/.\nUse \"Open Claude Chat in Browser\" command to open it, or configure Nova Project Settings → Preview URL."
+        "Claude chat is live at " + chatState.url + "\nUse \"Open Claude Chat in Browser\" command to open it, or configure Nova Project Settings → Preview URL."
       );
       break;
 
     case "chat_failed":
       console.error("Claude Code Bridge: chat server failed — " + msg.message);
+      chatState.state = "failed";
+      chatState.lastError = msg.message || "unknown error";
+      refreshChatStatusSidebar();
       showNotification("Chat UI failed to start", msg.message);
       break;
   }
@@ -1313,9 +1372,27 @@ function ensureActivitySidebars() {
       disposables.push(sessionsTree);
       startSessionsWatcher();
     }
+    if (!chatStatusProvider) {
+      // Hydrate from config so the row reflects intent immediately, even
+      // before startBridge() has a chance to mutate the state.
+      if (nova.config.get("claudecode.chat.enabled") !== true) {
+        chatState.state = "disabled";
+      }
+      chatStatusProvider = new ChatStatusTreeProvider(chatState);
+      chatStatusTree = new TreeView("claudecode.sidebar.chat", {
+        dataProvider: chatStatusProvider,
+      });
+      disposables.push(chatStatusTree);
+    }
   } catch (err) {
     console.error("Claude Code Bridge: activity sidebar init failed:", err.message);
   }
+}
+
+function refreshChatStatusSidebar() {
+  ensureActivitySidebars();
+  chatState.lastUpdatedAt = Date.now();
+  try { if (chatStatusTree) chatStatusTree.reload(); } catch (_) {}
 }
 
 // Watch the per-workspace session directory so the sidebar updates when
