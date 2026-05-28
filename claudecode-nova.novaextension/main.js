@@ -87,6 +87,8 @@ exports.activate = function() {
       nova.commands.register("claudecode.sidebarRefresh", sidebarRefreshHandler),
       nova.commands.register("claudecode.checkForUpdates", function() { checkForUpdates(false); }),
       nova.commands.register("claudecode.openChat", openChatHandler),
+      nova.commands.register("claudecode.setChatApiKey", setChatApiKeyHandler),
+      nova.commands.register("claudecode.clearChatApiKey", clearChatApiKeyHandler),
     );
     console.log("Claude Code Bridge: commands registered");
   } catch (err) {
@@ -168,23 +170,102 @@ function resolveNodePath() {
 // Chat (Mode B) — opt-in chat UI helpers
 // ---------------------------------------------------------------------------
 
-// Resolve the Anthropic API key for chat mode. Tries 1Password CLI first
-// (via `op read <ref>`), falls back to the direct config value. Returns
-// the key string, or empty string if no source is configured / op fails.
-async function resolveChatApiKey() {
-  const opRef  = (nova.config.get("claudecode.chat.apiKey1PassRef") || "").trim();
-  const direct = (nova.config.get("claudecode.chat.apiKey") || "").trim();
+// macOS Keychain service/account for the chat API key. Native, persistent,
+// no session-expiry issue (unlike 1Password CLI). Preferred source.
+const CHAT_KEYCHAIN_SERVICE = "ca.okapi.claudecode-nova";
+const CHAT_KEYCHAIN_ACCOUNT = "anthropic-api-key";
 
+// Resolve the Anthropic API key for chat mode. Priority order :
+//   1. macOS Keychain (native, persistent)
+//   2. 1Password CLI (op read — requires active `op signin` session)
+//   3. Plain-text config value (last-resort fallback)
+// Returns the key, or empty string if no source yields one.
+async function resolveChatApiKey() {
+  // 1) Keychain — preferred (set via the "Set Claude Chat API Key" command)
+  const kc = await readChatKeyFromKeychain();
+  if (kc) return kc;
+
+  // 2) 1Password CLI — only if a reference is configured
+  const opRef = (nova.config.get("claudecode.chat.apiKey1PassRef") || "").trim();
   if (opRef) {
     try {
       const key = await runOpRead(opRef);
       if (key) return key;
     } catch (err) {
-      console.warn("Claude Code Bridge: op read failed (" + err.message + ") — falling back to direct key");
+      console.warn("Claude Code Bridge: op read failed (" + err.message + ")");
     }
   }
 
-  return direct;
+  // 3) Direct config — last-resort plain-text fallback
+  return (nova.config.get("claudecode.chat.apiKey") || "").trim();
+}
+
+// Read the API key from the macOS Keychain. Empty string on miss/error
+// (no entry, denied access, etc.) — caller falls through to next source.
+async function readChatKeyFromKeychain() {
+  try {
+    const key = await nova.credentials.getPassword(CHAT_KEYCHAIN_SERVICE, CHAT_KEYCHAIN_ACCOUNT);
+    return (key || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+// "Set Claude Chat API Key" command — secure-input notification, stores
+// the key in macOS Keychain. The user must restart the bridge after for
+// the new key to take effect.
+async function setChatApiKeyHandler() {
+  const req = new NotificationRequest("claudecode.setChatApiKey");
+  req.title = "Set Claude Chat API Key";
+  req.body  = "Paste your Anthropic API key (starts with `sk-ant-…`). It will be stored in macOS Keychain — restart the bridge for it to take effect.";
+  req.type  = "secure-input";
+  req.textInputPlaceholder = "sk-ant-...";
+  req.actions = ["Save", "Cancel"];
+
+  let reply;
+  try {
+    reply = await nova.notifications.add(req);
+  } catch (err) {
+    console.warn("Claude Code Bridge: setChatApiKey notification cancelled — " + err.message);
+    return;
+  }
+
+  if (reply.actionIdx !== 0) return; // Cancel
+
+  const key = (reply.textInputValue || "").trim();
+  if (!key) {
+    showNotification("Empty key", "No API key entered — nothing stored.");
+    return;
+  }
+  if (!key.startsWith("sk-ant-")) {
+    showNotification(
+      "Suspicious format",
+      "The key does not start with `sk-ant-`. Stored anyway — verify it's an Anthropic API key."
+    );
+  }
+
+  try {
+    await nova.credentials.setPassword(CHAT_KEYCHAIN_SERVICE, CHAT_KEYCHAIN_ACCOUNT, key);
+    showNotification(
+      "Saved to Keychain",
+      "API key stored. Use `Claude Code Bridge: Restart Claude Code Bridge` for it to take effect."
+    );
+  } catch (err) {
+    showNotification("Save failed", "Could not store the key in Keychain: " + err.message);
+  }
+}
+
+// "Clear Claude Chat API Key" command — removes the Keychain entry.
+async function clearChatApiKeyHandler() {
+  try {
+    await nova.credentials.removePassword(CHAT_KEYCHAIN_SERVICE, CHAT_KEYCHAIN_ACCOUNT);
+    showNotification(
+      "Cleared",
+      "API key removed from Keychain. The bridge will fall back to 1Password or direct config on next restart."
+    );
+  } catch (err) {
+    showNotification("Clear failed", err.message);
+  }
 }
 
 // Run `op read <ref>` and capture stdout. Resolves with the trimmed output
