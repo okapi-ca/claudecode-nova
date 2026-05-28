@@ -6,21 +6,40 @@
 
 const $ = (id) => document.getElementById(id);
 
-const chatEl     = $("chat");
-const inputEl    = $("input");
-const sendBtn    = $("send");
-const abortBtn   = $("abort");
-const statusDot  = $("status-dot");
-const statusText = $("status-text");
-const emptyState = $("empty-state");
-const metaSess   = $("meta-session");
-const metaCost   = $("meta-cost");
+const chatEl       = $("chat");
+const inputEl      = $("input");
+const sendBtn      = $("send");
+const abortBtn     = $("abort");
+const statusDot    = $("status-dot");
+const statusText   = $("status-text");
+const emptyState   = $("empty-state");
+const metaSess     = $("meta-session");
+const metaCost     = $("meta-cost");
+const slashMenuEl  = $("slash-menu");
+const injectCtxEl  = $("inject-context");
 
 let ws = null;
 let inFlight = false;
 let currentAssistantBubble = null;
 let currentAssistantBuffer = "";
 let toolCardsByName = []; // queue of cards waiting for a matching tool_result
+
+// Slash commands available from the composer. The `cmd` value is sent
+// to the backend, which maps it to a templated prompt. The `desc` is
+// only used for the menu label.
+const SLASH_COMMANDS = [
+  { cmd: "explain",  label: "/explain",  desc: "Explain the selected code" },
+  { cmd: "refactor", label: "/refactor", desc: "Refactor for clarity" },
+  { cmd: "test",     label: "/test",     desc: "Write tests" },
+  { cmd: "doc",      label: "/doc",      desc: "Add inline documentation" },
+  { cmd: "fix",      label: "/fix",      desc: "Find and fix bugs" },
+];
+
+// When the user picks a slash command, we send it as a flag and clear
+// the input. Setting this here so the next send() picks it up.
+let pendingSlashCommand = null;
+let slashMenuVisible = false;
+let slashMenuActive = 0;
 
 // ── markdown render setup ─────────────────────────────────────────
 
@@ -271,14 +290,106 @@ function setStatus(kind, text) {
 
 function sendUserMessage() {
   const text = inputEl.value.trim();
-  if (!text || inFlight || !ws || ws.readyState !== WebSocket.OPEN) return;
+  // A slash command can be sent without extra text; otherwise require text.
+  if ((!text && !pendingSlashCommand) || inFlight || !ws || ws.readyState !== WebSocket.OPEN) return;
   inFlight = true;
-  appendUserMessage(text);
-  ws.send(JSON.stringify({ type: "user_message", text }));
+
+  const injectContext = !!(injectCtxEl && injectCtxEl.checked);
+  const slashCommand  = pendingSlashCommand;
+
+  // Visual representation: prepend the slash label so the user sees
+  // which command was used in the transcript.
+  const displayText = slashCommand
+    ? `/${slashCommand}${text ? " " + text : ""}`
+    : text;
+  appendUserMessage(displayText);
+
+  ws.send(JSON.stringify({
+    type: "user_message",
+    text,
+    slashCommand,
+    injectContext,
+  }));
+
   inputEl.value = "";
+  pendingSlashCommand = null;
+  hideSlashMenu();
   sendBtn.disabled = true;
   abortBtn.hidden = false;
   setStatus("thinking", "Sending…");
+}
+
+// ── slash-command menu ────────────────────────────────────────────
+
+function showSlashMenu(filter) {
+  const matches = SLASH_COMMANDS.filter((c) =>
+    !filter || c.cmd.startsWith(filter.toLowerCase())
+  );
+  if (matches.length === 0) { hideSlashMenu(); return; }
+
+  slashMenuEl.innerHTML = matches.map((c, i) => `
+    <button class="slash-menu__item${i === 0 ? " active" : ""}" data-cmd="${c.cmd}">
+      <span class="slash-menu__label">${c.label}</span>
+      <span class="slash-menu__desc">${c.desc}</span>
+    </button>
+  `).join("");
+  slashMenuEl.hidden = false;
+  slashMenuVisible = true;
+  slashMenuActive = 0;
+
+  slashMenuEl.querySelectorAll(".slash-menu__item").forEach((el) => {
+    el.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      pickSlashCommand(el.dataset.cmd);
+    });
+  });
+}
+
+function hideSlashMenu() {
+  slashMenuEl.hidden = true;
+  slashMenuVisible = false;
+}
+
+function moveSlashMenuActive(delta) {
+  const items = slashMenuEl.querySelectorAll(".slash-menu__item");
+  if (!items.length) return;
+  items[slashMenuActive]?.classList.remove("active");
+  slashMenuActive = (slashMenuActive + delta + items.length) % items.length;
+  items[slashMenuActive].classList.add("active");
+}
+
+function pickActiveSlashCommand() {
+  const item = slashMenuEl.querySelectorAll(".slash-menu__item")[slashMenuActive];
+  if (item) pickSlashCommand(item.dataset.cmd);
+}
+
+function pickSlashCommand(cmd) {
+  pendingSlashCommand = cmd;
+  // Clear the "/foo" the user typed and let them add extra context if they want
+  inputEl.value = "";
+  inputEl.placeholder = `/${cmd} — add any extra context, then press Enter (or Enter again to send as-is)`;
+  hideSlashMenu();
+  inputEl.focus();
+}
+
+function onInputChange() {
+  const val = inputEl.value;
+  if (val.startsWith("/") && !pendingSlashCommand) {
+    // Show menu, filter on what they've typed after "/"
+    const filter = val.slice(1);
+    if (filter.includes(" ") || filter.includes("\n")) {
+      hideSlashMenu(); // they moved on past the command name
+    } else {
+      showSlashMenu(filter);
+    }
+  } else if (slashMenuVisible) {
+    hideSlashMenu();
+  }
+
+  // Reset placeholder when they clear after a slash command was active
+  if (!val && !pendingSlashCommand) {
+    inputEl.placeholder = "Ask Claude… (type / for slash commands · Enter to send · Shift+Enter for newline)";
+  }
 }
 
 function abortQuery() {
@@ -291,10 +402,23 @@ function abortQuery() {
 sendBtn.addEventListener("click", sendUserMessage);
 abortBtn.addEventListener("click", abortQuery);
 
+inputEl.addEventListener("input", onInputChange);
 inputEl.addEventListener("keydown", (e) => {
+  // Slash menu nav takes priority when open
+  if (slashMenuVisible) {
+    if (e.key === "ArrowDown") { e.preventDefault(); moveSlashMenuActive(1); return; }
+    if (e.key === "ArrowUp")   { e.preventDefault(); moveSlashMenuActive(-1); return; }
+    if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickActiveSlashCommand(); return; }
+    if (e.key === "Escape") { e.preventDefault(); hideSlashMenu(); return; }
+  }
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     sendUserMessage();
+  }
+  if (e.key === "Escape" && pendingSlashCommand) {
+    e.preventDefault();
+    pendingSlashCommand = null;
+    inputEl.placeholder = "Ask Claude… (type / for slash commands · Enter to send · Shift+Enter for newline)";
   }
 });
 

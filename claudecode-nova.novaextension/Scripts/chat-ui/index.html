@@ -38,14 +38,21 @@
     <div class="composer__meta" id="meta">
       <span id="meta-session"></span>
       <span id="meta-cost"></span>
+      <label class="composer__toggle" title="Prepend your current file + selection to every prompt">
+        <input type="checkbox" id="inject-context" checked />
+        <span>Auto-inject context</span>
+      </label>
     </div>
     <div class="composer__row">
-      <textarea
-        id="input"
-        placeholder="Ask Claude…  (Enter to send, Shift+Enter for newline)"
-        rows="2"
-        autofocus
-      ></textarea>
+      <div class="composer__input-wrap">
+        <div id="slash-menu" class="slash-menu" hidden></div>
+        <textarea
+          id="input"
+          placeholder="Ask Claude… (type / for slash commands · Enter to send · Shift+Enter for newline)"
+          rows="2"
+          autofocus
+        ></textarea>
+      </div>
       <button id="send" class="btn btn--primary" title="Send (Enter)">Send</button>
       <button id="abort" class="btn btn--secondary" title="Abort current query" hidden>Stop</button>
     </div>

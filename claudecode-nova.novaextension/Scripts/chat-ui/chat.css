@@ -412,3 +412,70 @@ body {
   align-self: flex-start;
   max-width: 880px;
 }
+
+/* ── slash command menu ─────────────────────────────────────────── */
+
+.composer__input-wrap { position: relative; flex: 1; display: flex; min-width: 0; }
+.composer__input-wrap > #input { width: 100%; box-sizing: border-box; }
+
+.slash-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: #25252b;
+  border: 1px solid #3a3a42;
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  overflow: hidden;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 10;
+}
+
+.slash-menu__item {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 0;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.slash-menu__item:hover,
+.slash-menu__item.active {
+  background: #32323a;
+}
+
+.slash-menu__label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #a5d8ff;
+  min-width: 90px;
+}
+
+.slash-menu__desc {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ── auto-inject context toggle ─────────────────────────────────── */
+
+.composer__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.composer__toggle input { margin: 0; }
+
+.composer__meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
