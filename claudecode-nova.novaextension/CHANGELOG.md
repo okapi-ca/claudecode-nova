@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.7.0 — 2026-05-28
+
+### Added
+- **Recent Sessions sidebar.** New section under the Claude Code
+  sidebar that lists per-workspace Claude Code sessions read from
+  `~/.claude/projects/<encoded-cwd>/*.jsonl`, sorted by recency, with
+  the first real user-message excerpt as preview and a relative
+  timestamp ("just now", "12m ago", "3d ago"). Clicking a row copies
+  `claude --resume <id>` to the clipboard so you can paste it into
+  any terminal. A header Refresh button rescans the directory; an
+  `nova.fs.watch` keeps the list reactive while you work.
+- **Chat UI Status sidebar.** Replaces the previous "Chat UI"
+  placeholder section. Single-row tree view showing the chat server
+  lifecycle (`disabled`, `missing API key`, `starting…`, `running on
+  port N`, `failed to start`, or `stopped`), with the active model
+  and API-key source (Keychain / 1Password / config) surfaced in the
+  tooltip. Wired into `chat_started` / `chat_failed` events from
+  `ws-server.js` plus the subprocess exit hook.
+
+### Fixed
+- **Version sidebar stuck on "unknown" at startup.** When the 24h
+  auto-check throttle blocked the npm round-trip, `versionState`
+  stayed at `"unknown"` and the row never populated until the user
+  manually triggered a check. Now hydrates `currentVersion` from the
+  cached `claudecode.updateCheck.lastSeenVersion` config before the
+  throttle decision so the version appears immediately.
+
+### Changed
+- "Chat UI" sidebar section renamed to "Chat UI Status" to reflect
+  its new content. The header "Open" button is unchanged.
+
+### Internal
+- `Scripts/main.js` is now the real entry point (the file Nova
+  actually loads, despite `extension.json:main` pointing at the root
+  `main.js`). Root `main.js` is kept as a synchronised copy because
+  Nova refuses to load the extension if the manifest's main file is
+  missing — confirmed empirically and re-documented in the v0.4.x
+  CHANGELOG note. Edit `Scripts/main.js`, then mirror to root with
+  `sed 's|require("\./|require("./Scripts/|g'`.
+
 ## 0.6.2 — 2026-05-28
 
 ### Added
