@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.1 — 2026-05-28
+
+### Added
+- **macOS Keychain as the preferred Anthropic API key source for chat (Mode B).**
+  Two new commands : `Claude Code Bridge: Set Claude Chat API Key (Keychain)`
+  prompts for the key via a secure-input notification and stores it via
+  `nova.credentials.setPassword("ca.okapi.claudecode-nova", "anthropic-api-key", …)` ;
+  `Claude Code Bridge: Clear Claude Chat API Key (Keychain)` removes it.
+- **`resolveChatApiKey()` priority order revisited** : Keychain first
+  (persistent, no session expiry), then 1Password CLI (only if a reference
+  is configured), then the plain-text `claudecode.chat.apiKey` config as
+  last resort. Eliminates the silent-failure case where `op read` fails
+  because the 1Password CLI session expired (~30 min) and the bridge
+  silently spawned without `CC_CHAT_ENABLED`.
+
+### Changed
+- Settings descriptions clarified : 1Password ref now warns about session
+  expiry and points to the Keychain command as the recommended source.
+
 ## 0.6.0 — 2026-05-28
 
 ### Added

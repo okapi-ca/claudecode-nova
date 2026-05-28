@@ -3,7 +3,7 @@
   "name": "Claude Code Bridge",
   "organization": "okapi-ca",
   "description": "Integrates Claude Code CLI with Nova via the WebSocket MCP protocol, providing context sharing, diff viewing, and selection tracking.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "categories": ["commands", "sidebars"],
   "license": "MIT",
   "repository": "https://github.com/okapi-ca/claudecode-nova",
@@ -60,6 +60,14 @@
       {
         "title": "Open Claude Chat in Browser",
         "command": "claudecode.openChat"
+      },
+      {
+        "title": "Set Claude Chat API Key (Keychain)",
+        "command": "claudecode.setChatApiKey"
+      },
+      {
+        "title": "Clear Claude Chat API Key (Keychain)",
+        "command": "claudecode.clearChatApiKey"
       },
       {
         "title": "Check for Claude Code Updates",
@@ -235,17 +243,17 @@
     },
     {
       "key": "claudecode.chat.apiKey1PassRef",
-      "title": "Anthropic API Key — 1Password reference",
+      "title": "Anthropic API Key — 1Password reference (optional)",
       "type": "string",
       "default": "",
-      "description": "1Password CLI reference like `op://Private/Anthropic API Key/credential`. Read at extension activation via `op read`. Leave empty if using the env var fallback or to disable chat auth."
+      "description": "1Password CLI reference like `op://Private/Anthropic API Key/credential`. Requires an active `op signin` session ; expires after ~30 min, then chat init fails silently until re-signin. The macOS Keychain (set via 'Set Claude Chat API Key' command) is the recommended source — persistent, no session expiry."
     },
     {
       "key": "claudecode.chat.apiKey",
-      "title": "Anthropic API Key — direct (fallback if 1Password not configured)",
+      "title": "Anthropic API Key — direct (last-resort fallback)",
       "type": "string",
       "default": "",
-      "description": "Direct API key — used only if the 1Password reference above is empty. Prefer the 1Password reference for security."
+      "description": "Plain-text API key — used only if both the Keychain AND 1Password reference are empty. Stored in Nova settings (not encrypted at rest). Prefer the Keychain via 'Set Claude Chat API Key' command."
     },
     {
       "key": "claudecode.chat.model",

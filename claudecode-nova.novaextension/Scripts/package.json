@@ -1,6 +1,6 @@
 {
   "name": "claudecode-nova-scripts",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "type": "commonjs",
   "description": "Node subprocess scripts for the Claude Code Nova extension. ws-server.js is CommonJS (uses node built-ins only). chat-session.mjs is ES Modules (uses SDK).",
