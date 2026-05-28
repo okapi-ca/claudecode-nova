@@ -3,7 +3,7 @@
   "name": "Claude Code Bridge",
   "organization": "okapi-ca",
   "description": "Integrates Claude Code CLI with Nova via the WebSocket MCP protocol, providing context sharing, diff viewing, and selection tracking.",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "categories": ["commands", "sidebars"],
   "license": "MIT",
   "repository": "https://github.com/okapi-ca/claudecode-nova",
@@ -240,6 +240,20 @@
       "type": "boolean",
       "default": false,
       "description": "Opt-in to the in-browser chat UI powered by the Claude Agent SDK. Requires an Anthropic API key. When enabled, a chat server starts on the configured port; open the URL in Safari/Firefox or in Nova's Preview tab. Independent from the existing CLI bridge mode."
+    },
+    {
+      "key": "claudecode.chat.keychainService",
+      "title": "Keychain service (advanced — point to an existing entry from another app)",
+      "type": "string",
+      "default": "ca.okapi.claudecode-nova",
+      "description": "macOS Keychain service identifier used to read/write the chat API key. Default is this extension's own namespace. Set this to another service (e.g. `com.anthropic.claudefordesktop` or `Cline`) if you already have an Anthropic key stored by another tool — both `Set` and `Clear` commands will then operate on that entry, so use with care."
+    },
+    {
+      "key": "claudecode.chat.keychainAccount",
+      "title": "Keychain account name",
+      "type": "string",
+      "default": "anthropic-api-key",
+      "description": "Account name within the Keychain service above. Together they form the (service, account) pair that uniquely identifies the entry."
     },
     {
       "key": "claudecode.chat.apiKey1PassRef",

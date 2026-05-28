@@ -170,10 +170,20 @@ function resolveNodePath() {
 // Chat (Mode B) — opt-in chat UI helpers
 // ---------------------------------------------------------------------------
 
-// macOS Keychain service/account for the chat API key. Native, persistent,
-// no session-expiry issue (unlike 1Password CLI). Preferred source.
-const CHAT_KEYCHAIN_SERVICE = "ca.okapi.claudecode-nova";
-const CHAT_KEYCHAIN_ACCOUNT = "anthropic-api-key";
+// macOS Keychain entry coordinates. Defaults match this extension's own
+// namespace, but both can be re-pointed at an existing entry from another
+// app (Claude Desktop, Cline, etc.) via the `claudecode.chat.keychainService`
+// and `claudecode.chat.keychainAccount` config keys. Read at call time so
+// changing them in settings takes effect on the next operation.
+const DEFAULT_KEYCHAIN_SERVICE = "ca.okapi.claudecode-nova";
+const DEFAULT_KEYCHAIN_ACCOUNT = "anthropic-api-key";
+
+function chatKeychainService() {
+  return (nova.config.get("claudecode.chat.keychainService") || "").trim() || DEFAULT_KEYCHAIN_SERVICE;
+}
+function chatKeychainAccount() {
+  return (nova.config.get("claudecode.chat.keychainAccount") || "").trim() || DEFAULT_KEYCHAIN_ACCOUNT;
+}
 
 // Resolve the Anthropic API key for chat mode. Priority order :
 //   1. macOS Keychain (native, persistent)
@@ -200,11 +210,11 @@ async function resolveChatApiKey() {
   return (nova.config.get("claudecode.chat.apiKey") || "").trim();
 }
 
-// Read the API key from the macOS Keychain. Empty string on miss/error
-// (no entry, denied access, etc.) — caller falls through to next source.
+// Read the API key from the macOS Keychain at the configured service +
+// account. Empty string on miss/error — caller falls through to next source.
 async function readChatKeyFromKeychain() {
   try {
-    const key = await nova.credentials.getPassword(CHAT_KEYCHAIN_SERVICE, CHAT_KEYCHAIN_ACCOUNT);
+    const key = await nova.credentials.getPassword(chatKeychainService(), chatKeychainAccount());
     return (key || "").trim();
   } catch (_) {
     return "";
@@ -212,12 +222,20 @@ async function readChatKeyFromKeychain() {
 }
 
 // "Set Claude Chat API Key" command — secure-input notification, stores
-// the key in macOS Keychain. The user must restart the bridge after for
-// the new key to take effect.
+// the key in macOS Keychain at the configured service/account. The user
+// must restart the bridge for the new key to take effect.
 async function setChatApiKeyHandler() {
+  const svc = chatKeychainService();
+  const acct = chatKeychainAccount();
+
   const req = new NotificationRequest("claudecode.setChatApiKey");
   req.title = "Set Claude Chat API Key";
-  req.body  = "Paste your Anthropic API key (starts with `sk-ant-…`). It will be stored in macOS Keychain — restart the bridge for it to take effect.";
+  req.body  =
+    "Paste your Anthropic API key (starts with `sk-ant-…`).\n\n" +
+    "Will be stored in macOS Keychain at :\n" +
+    "  service : " + svc + "\n" +
+    "  account : " + acct + "\n\n" +
+    "Restart the bridge after saving for it to take effect.";
   req.type  = "secure-input";
   req.textInputPlaceholder = "sk-ant-...";
   req.actions = ["Save", "Cancel"];
@@ -245,23 +263,28 @@ async function setChatApiKeyHandler() {
   }
 
   try {
-    await nova.credentials.setPassword(CHAT_KEYCHAIN_SERVICE, CHAT_KEYCHAIN_ACCOUNT, key);
+    await nova.credentials.setPassword(svc, acct, key);
     showNotification(
       "Saved to Keychain",
-      "API key stored. Use `Claude Code Bridge: Restart Claude Code Bridge` for it to take effect."
+      "API key stored at service `" + svc + "` / account `" + acct + "`.\nRestart the bridge for it to take effect."
     );
   } catch (err) {
     showNotification("Save failed", "Could not store the key in Keychain: " + err.message);
   }
 }
 
-// "Clear Claude Chat API Key" command — removes the Keychain entry.
+// "Clear Claude Chat API Key" command — removes the Keychain entry at the
+// configured service/account. Warns explicitly so the user sees what's
+// about to be deleted (especially relevant when pointing at an external app's entry).
 async function clearChatApiKeyHandler() {
+  const svc = chatKeychainService();
+  const acct = chatKeychainAccount();
+
   try {
-    await nova.credentials.removePassword(CHAT_KEYCHAIN_SERVICE, CHAT_KEYCHAIN_ACCOUNT);
+    await nova.credentials.removePassword(svc, acct);
     showNotification(
       "Cleared",
-      "API key removed from Keychain. The bridge will fall back to 1Password or direct config on next restart."
+      "Keychain entry removed (service `" + svc + "` / account `" + acct + "`).\nThe bridge will fall back to 1Password or direct config on next restart."
     );
   } catch (err) {
     showNotification("Clear failed", err.message);
