@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Claude Code · Nova chat (M2 demo)</title>
+  <link rel="stylesheet" href="chat.css" />
+  <!-- highlight.js for code blocks (atom-one-dark theme) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/styles/atom-one-dark.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <!-- marked for markdown rendering -->
+  <script defer src="https://cdn.jsdelivr.net/npm/marked@13.0.3/marked.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__title">
+      <span class="topbar__brand">Claude Code · Nova</span>
+      <span class="topbar__sub">M2 chat UI demo</span>
+    </div>
+    <div class="topbar__status" id="status">
+      <span class="dot dot--idle" id="status-dot"></span>
+      <span id="status-text">Connecting…</span>
+    </div>
+  </header>
+
+  <main class="chat" id="chat">
+    <div class="chat__empty" id="empty-state">
+      <div class="chat__empty-title">Try something like :</div>
+      <ul class="chat__empty-list">
+        <li><button class="suggestion" data-prompt="List the files in the workspace and tell me what this project does.">List the files in the workspace and tell me what this project does.</button></li>
+        <li><button class="suggestion" data-prompt="Read src/auth.ts and identify any security issues.">Read src/auth.ts and identify any security issues.</button></li>
+        <li><button class="suggestion" data-prompt="Get the diagnostics for src/auth.ts.">Get the diagnostics for src/auth.ts.</button></li>
+      </ul>
+    </div>
+  </main>
+
+  <footer class="composer">
+    <div class="composer__meta" id="meta">
+      <span id="meta-session"></span>
+      <span id="meta-cost"></span>
+    </div>
+    <div class="composer__row">
+      <textarea
+        id="input"
+        placeholder="Ask Claude…  (Enter to send, Shift+Enter for newline)"
+        rows="2"
+        autofocus
+      ></textarea>
+      <button id="send" class="btn btn--primary" title="Send (Enter)">Send</button>
+      <button id="abort" class="btn btn--secondary" title="Abort current query" hidden>Stop</button>
+    </div>
+  </footer>
+
+  <script type="module" src="chat.js"></script>
+</body>
+</html>

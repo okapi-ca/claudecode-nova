@@ -3,7 +3,7 @@
   "name": "Claude Code Bridge",
   "organization": "okapi-ca",
   "description": "Integrates Claude Code CLI with Nova via the WebSocket MCP protocol, providing context sharing, diff viewing, and selection tracking.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "categories": ["commands", "sidebars"],
   "license": "MIT",
   "repository": "https://github.com/okapi-ca/claudecode-nova",
@@ -56,6 +56,14 @@
       {
         "title": "Launch Claude Code (with IDE integration)",
         "command": "claudecode.launchClaude"
+      },
+      {
+        "title": "Open Claude Chat in Browser",
+        "command": "claudecode.openChat"
+      },
+      {
+        "title": "Check for Claude Code Updates",
+        "command": "claudecode.checkForUpdates"
       }
     ]
   },
@@ -117,6 +125,32 @@
               "tooltip": "Clear activity log"
             }
           ]
+        },
+        {
+          "id": "claudecode.sidebar.version",
+          "name": "Claude Code Version",
+          "placeholderText": "Checking…",
+          "headerCommands": [
+            {
+              "title": "Check",
+              "image": "__builtin.refresh",
+              "command": "claudecode.checkForUpdates",
+              "tooltip": "Check for Claude Code updates"
+            }
+          ]
+        },
+        {
+          "id": "claudecode.sidebar.chat",
+          "name": "Chat UI",
+          "placeholderText": "Chat UI is disabled. Enable in settings.",
+          "headerCommands": [
+            {
+              "title": "Open",
+              "image": "__builtin.path.action",
+              "command": "claudecode.openChat",
+              "tooltip": "Open the Claude chat UI in your browser"
+            }
+          ]
         }
       ]
     }
@@ -173,6 +207,64 @@
       ],
       "default": "auto",
       "description": "Where the \"Launch Claude Code\" command opens the CLI. Other terminals (Warp, Ghostty, Hyper) fall back to clipboard — choose \"clipboard\" explicitly to keep the v0.1.x behaviour."
+    },
+    {
+      "key": "claudecode.updateCheck.autoCheck",
+      "title": "Auto-check for Claude Code updates",
+      "type": "boolean",
+      "default": true,
+      "description": "Check daily for new Claude Code CLI versions when the extension activates. Only shows a notification when an update is available."
+    },
+    {
+      "key": "claudecode.updateCheck.channel",
+      "title": "Update channel",
+      "type": "enum",
+      "values": [
+        ["stable", "Stable (npm latest)"],
+        ["next", "Next (npm @next pre-releases)"]
+      ],
+      "default": "stable",
+      "description": "Which npm dist-tag to compare against. \"next\" surfaces pre-release versions."
+    },
+    {
+      "key": "claudecode.chat.enabled",
+      "title": "Enable Chat UI (Mode B — experimental)",
+      "type": "boolean",
+      "default": false,
+      "description": "Opt-in to the in-browser chat UI powered by the Claude Agent SDK. Requires an Anthropic API key. When enabled, a chat server starts on the configured port; open the URL in Safari/Firefox or in Nova's Preview tab. Independent from the existing CLI bridge mode."
+    },
+    {
+      "key": "claudecode.chat.apiKey1PassRef",
+      "title": "Anthropic API Key — 1Password reference",
+      "type": "string",
+      "default": "",
+      "description": "1Password CLI reference like `op://Private/Anthropic API Key/credential`. Read at extension activation via `op read`. Leave empty if using the env var fallback or to disable chat auth."
+    },
+    {
+      "key": "claudecode.chat.apiKey",
+      "title": "Anthropic API Key — direct (fallback if 1Password not configured)",
+      "type": "string",
+      "default": "",
+      "description": "Direct API key — used only if the 1Password reference above is empty. Prefer the 1Password reference for security."
+    },
+    {
+      "key": "claudecode.chat.model",
+      "title": "Chat model",
+      "type": "enum",
+      "values": [
+        ["claude-sonnet-4-6", "Sonnet 4.6 (recommended — cheap, capable)"],
+        ["claude-haiku-4-5", "Haiku 4.5 (fastest, lowest cost)"],
+        ["claude-opus-4-7", "Opus 4.7 (most capable, expensive)"]
+      ],
+      "default": "claude-sonnet-4-6",
+      "description": "Model used by the chat UI. Sonnet 4.6 hits the sweet spot for cost/quality."
+    },
+    {
+      "key": "claudecode.chat.port",
+      "title": "Chat UI port",
+      "type": "number",
+      "default": 5180,
+      "description": "Fixed port for the chat HTTP server. Configure Nova's Project Settings → Preview URL to http://127.0.0.1:<port>/ to use the chat UI inside the Preview tab."
     }
   ],
 

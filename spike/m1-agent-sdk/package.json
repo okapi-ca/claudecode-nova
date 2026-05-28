@@ -1,0 +1,14 @@
+{
+  "name": "m1-agent-sdk-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "M1 spike — validate @anthropic-ai/claude-agent-sdk for Nova chat UI backend",
+  "scripts": {
+    "test:basic": "node test1-basic.mjs",
+    "test:tool": "node test2-with-tool.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.0"
+  }
+}
