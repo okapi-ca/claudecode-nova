@@ -271,27 +271,60 @@ claudecode-nova.novaextension/
 - Lock files are removed on clean shutdown
 - No data leaves your machine — all communication is local IPC
 
-## Roadmap
+## Recent Releases
 
-### v0.2.0 (shipped)
-- [x] One-click launch into iTerm or Terminal.app with IDE env vars pre-set
-- [x] User edits in the proposed-changes tab are preserved on Accept and signalled to Claude (`userEdited` / `finalContent`)
-- [x] Sidebar with Pending Diffs queue (per-item Accept/Reject) and Activity log (visible-effect events + raw tool-call group)
-- [ ] Improved diff view with side-by-side file comparison
-- [ ] Diagnostics integration via shared IssueCollection
-- [ ] Accurate line number tracking in selections
+For the full version history see [CHANGELOG.md](CHANGELOG.md).
 
-### v0.3.0
-- [ ] Warp / Ghostty / Hyper launch support (URL-scheme or wrapper-script approach)
-- [ ] Configurable keyboard shortcuts
-- [ ] Multi-workspace support
-- [ ] File watcher for external changes
+### v0.11.0 — live model picker, mode badge, thinking stream
+- Live model picker (Sonnet 4.6 · Haiku 4.5 · Opus 4.7 · Opus 4.8 1M)
+  in the chat composer — switch mid-conversation, no restart
+- CLI / SDK mode badge clarifies subscription vs API billing
+- Streaming "💭 Reasoning…" block during Claude's internal thinking
+- Pending placeholder (3 pulsing dots) until the first delta arrives
+- CLI subprocess parser now also surfaces `tool_use` / `tool_result`
+  events as tool cards with running spinners
 
-### v1.0.0
-- [ ] Full MCP protocol v2 compatibility
-- [ ] Automated test suite
-- [ ] Publication on [extensions.panic.com](https://extensions.panic.com)
-- [ ] Proper icon set
+### v0.10.0 — Open chat in Nova Preview tab
+- New "Open in Nova Preview" action: writes an HTML iframe wrapper
+  and opens it in Nova; `Cmd+Shift+H` then docks it as a side panel
+- Idempotent regeneration (user customizations preserved)
+
+### v0.9.0 — Chat without an API key (CLI subprocess fallback)
+- When no Anthropic key is configured, chat spawns the `claude` CLI
+  and parses its `--output-format stream-json` output
+- Uses your existing Claude Code OAuth session (Pro / Max / Enterprise)
+- Multi-turn via `--resume <session_id>`; auto-detection, no setting
+
+### v0.8.0 — Slash commands + workspace context auto-injection
+- `/explain`, `/refactor`, `/test`, `/doc`, `/fix` with a filterable
+  menu (arrow keys to navigate, Enter / Tab to pick, Esc to cancel)
+- "Auto-inject context" toggle prepends current file + selection to
+  every prompt — Claude no longer has to ask "what are you on?"
+
+### v0.7.0 — Recent Sessions sidebar + Chat UI Status
+- Per-workspace Claude Code sessions sidebar — click an entry to
+  copy `claude --resume <id>` to the clipboard
+- Chat UI Status sidebar replaces the old empty placeholder with
+  lifecycle states (disabled / no_key / starting / running /
+  failed / stopped) including port + model + key source
+- Fix: version sidebar no longer stuck on "unknown" when the 24h
+  auto-check throttle blocks the npm call
+
+### v0.6.x — Chat UI (Mode B) opt-in
+- Opt-in browser-based chat powered by `@anthropic-ai/claude-agent-sdk`
+- Anthropic API key resolved from macOS Keychain → 1Password → config
+- 12 Nova editor tools exposed to the SDK as in-process MCP tools
+
+## Future ideas
+
+- In-process custom tools beyond the 12 Nova wrappers (apply edit at
+  selection, spawn terminal command, inline hints) — SDK mode only
+- Multimodal: drag-drop images into the chat for vision-aware
+  questions
+- Extended thinking mode toggle (`thinking.budget_tokens`)
+- Specialized sub-agents invocable from chat (reviewer, test-writer)
+- Auto-purge of zombie chat server on the chat port at bridge startup
+- Side-by-side diff view (currently single-file proposed changes)
 
 ## Contributing
 
