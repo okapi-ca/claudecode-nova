@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.11.0 — 2026-05-28
+
+### Added
+- **Live model picker in the chat composer.** A `<select>` in the
+  meta bar lets you switch between Sonnet 4.6, Haiku 4.5, Opus 4.7
+  and the new Opus 4.8 (1M context) at any point — no bridge
+  restart. The picker auto-syncs on `session_started` to whatever
+  the backend actually launched with, then a new WS message
+  `set_model` flips the shared `model` variable for the next
+  prompt. Sessions that mix models continue working because the
+  CLI's `--resume <session_id>` and the SDK's `resume` option both
+  accept a model change mid-conversation.
+- **CLI / SDK mode badge** in the meta bar — a small green "CLI"
+  or blue "SDK" pill with a tooltip explaining the billing source
+  (Enterprise/Pro/Max subscription vs Anthropic API key). Makes the
+  cost line below it unambiguous: in CLI mode the figure is
+  informative-only (would-be API equivalent), in SDK mode it's the
+  actual billed amount.
+- **Live thinking stream.** When the CLI emits `thinking_delta`
+  events (or the SDK emits `thinking` content blocks with extended
+  thinking enabled), the chat shows a collapsible "💭 Reasoning…"
+  block with a spinner that fills in real time as Claude reasons.
+  Auto-collapses when the actual answer starts; click to re-open.
+  Gives a clear "Claude is working in the background" signal that
+  was previously invisible in CLI mode.
+- **Pending placeholder** — three pulsing dots and "Claude is
+  thinking…" appear immediately after Send, until the first delta
+  arrives (typically 1-3s on cold context). Prevents the
+  "is-it-frozen?" feeling on the latency-prone first chunk.
+- **`Opus 4.8 (1M context)`** added to the model enum in
+  `extension.json`. Available immediately on Claude Code CLI
+  subscriptions; for SDK mode, depends on API key access.
+
+### Changed
+- The CLI subprocess parser now handles three more event categories
+  in addition to `text_delta` and `result`: `thinking_delta`,
+  top-level `assistant` events containing `tool_use` blocks, and
+  top-level `user` events containing `tool_result` blocks. As a
+  result, Bash/Read/Edit and other tool invocations that the
+  `claude` CLI performs internally are now surfaced as tool cards
+  in the chat UI with the same "running" spinner that SDK mode has.
+- Status bar text transitions reflect the active stage:
+  `Sending…` → `Thinking aloud…` (during reasoning) → `Using
+  <tool>…` → `Processing result…` → `Writing response…` → `Ready`.
+- The `session_started` server event now includes a `mode` field
+  (`"cli"` or `"sdk"`) so the frontend can render the badge.
+
 ## 0.10.0 — 2026-05-28
 
 ### Added
