@@ -684,25 +684,24 @@ async function startServer() {
 
     // Conditionally start the chat module (Mode B — opt-in chat UI).
     // Wrapped in try/catch so a chat init failure never kills the MCP server.
+    // Two-mode: SDK (with CHAT_API_KEY) or CLI subprocess fallback (no key —
+    // uses the user's existing Claude Code OAuth session).
     if (CHAT_ENABLED) {
-      if (!CHAT_API_KEY) {
-        log("error", "Chat enabled (CC_CHAT_ENABLED=1) but ANTHROPIC_API_KEY missing — chat disabled");
-      } else {
-        try {
-          const chatModule = await import("./chat-session.mjs");
-          chatHandle = await chatModule.init({
-            port: CHAT_PORT,
-            apiKey: CHAT_API_KEY,
-            model: CHAT_MODEL,
-            callNovaTool,
-            log,
-          });
-          log("info", `Chat server listening on http://127.0.0.1:${CHAT_PORT}/`);
-          sendToNova({ type: "chat_started", port: CHAT_PORT });
-        } catch (err) {
-          log("error", `Failed to start chat server: ${err.message}`);
-          sendToNova({ type: "chat_failed", message: err.message });
-        }
+      try {
+        const chatModule = await import("./chat-session.mjs");
+        chatHandle = await chatModule.init({
+          port: CHAT_PORT,
+          apiKey: CHAT_API_KEY || null,
+          model: CHAT_MODEL,
+          claudePath: process.env.CC_CLAUDE_PATH || "claude",
+          callNovaTool,
+          log,
+        });
+        log("info", `Chat server listening on http://127.0.0.1:${CHAT_PORT}/`);
+        sendToNova({ type: "chat_started", port: CHAT_PORT });
+      } catch (err) {
+        log("error", `Failed to start chat server: ${err.message}`);
+        sendToNova({ type: "chat_failed", message: err.message });
       }
     }
   });

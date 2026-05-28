@@ -17,6 +17,7 @@
 
 import { createServer } from "http";
 import { readFile } from "fs/promises";
+import { spawn } from "child_process";
 import { dirname, extname, join } from "path";
 import { fileURLToPath } from "url";
 import { WebSocketServer } from "ws";
@@ -47,14 +48,23 @@ const MIME = {
  * @param {Function} opts.log            (level, msg, data?) → void
  */
 export async function init(opts) {
-  const { port, apiKey, model = "claude-sonnet-4-6", callNovaTool, log } = opts;
+  const { port, apiKey, model = "claude-sonnet-4-6", callNovaTool, log, claudePath } = opts;
 
-  if (!apiKey) {
-    throw new Error("chat-session: apiKey is required");
+  // Two execution modes :
+  //   - "sdk" : use @anthropic-ai/claude-agent-sdk with ANTHROPIC_API_KEY.
+  //     Streaming + Nova tools + abort signal — full feature set.
+  //   - "cli" : spawn `claude -p ... --output-format stream-json` as a
+  //     subprocess. Uses the user's existing Claude Code CLI auth (OAuth
+  //     Pro/Max session) so no API key is needed. Multi-turn via
+  //     --resume <session_id>. Nova tools come from the CLI's own MCP
+  //     bridge, not the SDK in-process tools.
+  const chatMode = apiKey ? "sdk" : "cli";
+  if (chatMode === "sdk") {
+    process.env.ANTHROPIC_API_KEY = apiKey;
+    log("info", "chat: using SDK mode (API key resolved)");
+  } else {
+    log("info", "chat: no API key — falling back to CLI subprocess mode (uses Claude Code session auth)");
   }
-
-  // The SDK reads this from process.env (it's an env-driven API)
-  process.env.ANTHROPIC_API_KEY = apiKey;
 
   const { server: novaServer, toolNames: allowedToolNames } = buildNovaToolsServer({ callNovaTool, log });
   log("info", `chat: ${allowedToolNames.length} Nova tools exposed to SDK`);
@@ -135,6 +145,102 @@ export async function init(opts) {
     return parts.join("\n\n");
   }
 
+  // CLI subprocess driver. Spawns `claude -p ... --output-format stream-json`
+  // and translates the CLI's event stream into the same wire format that
+  // the SDK path emits (assistant_text / session_started / result), so the
+  // frontend doesn't care which backend is active.
+  function runClaudeCLI({ prompt, sessionId, send, log, abortController }) {
+    return new Promise((resolve, reject) => {
+      const claudeBin = claudePath || "claude";
+      const args = [
+        "-p", prompt,
+        "--output-format", "stream-json",
+        "--include-partial-messages",
+        "--verbose", // required for stream-json to emit deltas
+        "--model", model,
+      ];
+      if (sessionId) args.push("--resume", sessionId);
+
+      // Inherit env; Nova passes a limited PATH so we extend it with the
+      // usual install locations for the `claude` CLI when claudeBin is not
+      // an absolute path.
+      const env = { ...process.env };
+      if (!claudeBin.startsWith("/")) {
+        const home = process.env.HOME || "";
+        const extra = [`${home}/.local/bin`, "/usr/local/bin", "/opt/homebrew/bin"];
+        const cur = (env.PATH || "").split(":");
+        env.PATH = [...new Set([...extra, ...cur])].filter(Boolean).join(":");
+      }
+
+      let child;
+      try {
+        child = spawn(claudeBin, args, {
+          env,
+          stdio: ["ignore", "pipe", "pipe"],
+          signal: abortController?.signal,
+        });
+      } catch (err) {
+        reject(err);
+        return;
+      }
+
+      let stdoutBuf = "";
+      let stderrBuf = "";
+      let capturedSessionId = null;
+      let lastCost = null;
+      let lastUsage = null;
+
+      child.stdout.on("data", (chunk) => {
+        stdoutBuf += chunk.toString("utf8");
+        let nl;
+        while ((nl = stdoutBuf.indexOf("\n")) !== -1) {
+          const line = stdoutBuf.slice(0, nl).trim();
+          stdoutBuf = stdoutBuf.slice(nl + 1);
+          if (!line) continue;
+          let evt;
+          try { evt = JSON.parse(line); }
+          catch (err) { log("warn", `chat cli: bad json line: ${line.slice(0, 120)}`); continue; }
+
+          // Map CLI events → frontend wire format.
+          if (evt.type === "system" && evt.subtype === "init") {
+            capturedSessionId = evt.session_id;
+            send({ type: "session_started", sessionId: evt.session_id, model: evt.model ?? model });
+          } else if (evt.type === "stream_event" && evt.event?.type === "content_block_delta") {
+            const delta = evt.event.delta;
+            if (delta?.type === "text_delta" && typeof delta.text === "string") {
+              send({ type: "assistant_text", chunk: delta.text });
+            }
+          } else if (evt.type === "result") {
+            lastCost = evt.total_cost_usd ?? null;
+            lastUsage = evt.usage ?? null;
+          }
+        }
+      });
+
+      child.stderr.on("data", (chunk) => { stderrBuf += chunk.toString("utf8"); });
+
+      child.on("error", (err) => reject(err));
+      child.on("close", (code) => {
+        if (code === 0) {
+          send({
+            type: "result",
+            success: true,
+            cost: lastCost,
+            tokens: lastUsage ? { input: lastUsage.input_tokens, output: lastUsage.output_tokens } : null,
+          });
+          resolve({ sessionId: capturedSessionId });
+        } else {
+          send({
+            type: "result",
+            success: false,
+            error: stderrBuf.trim().split("\n").slice(-3).join("\n") || `claude CLI exited with code ${code}`,
+          });
+          resolve({ sessionId: capturedSessionId }); // resolve, not reject — error already surfaced to client
+        }
+      });
+    });
+  }
+
   // ── HTTP server (static files) ─────────────────────────────────
   const httpServer = createServer(async (req, res) => {
     try {
@@ -199,6 +305,31 @@ export async function init(opts) {
         slashCommand: msg.slashCommand || null,
         injectContext: msg.injectContext === true,
       });
+
+      // CLI mode: spawn `claude -p ...`, parse stream-json, map events.
+      // Reuses the user's OAuth Pro/Max session, no API key needed.
+      if (chatMode === "cli") {
+        try {
+          const { sessionId } = await runClaudeCLI({
+            prompt,
+            sessionId: currentSessionId,
+            send,
+            log,
+            abortController: currentAbortController,
+          });
+          if (sessionId && !currentSessionId) currentSessionId = sessionId;
+        } catch (err) {
+          if (err.name === "AbortError") {
+            send({ type: "error", message: "query aborted" });
+          } else {
+            log("error", `chat CLI error: ${err.message}`);
+            send({ type: "error", message: err.message || String(err) });
+          }
+        } finally {
+          currentAbortController = null;
+        }
+        return;
+      }
 
       try {
         const q = query({

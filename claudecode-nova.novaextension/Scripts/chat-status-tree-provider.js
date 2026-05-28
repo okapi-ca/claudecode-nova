@@ -55,12 +55,23 @@ function formatLabel(s) {
 }
 
 function formatDescriptive(s) {
-  if (s.state === "running" && s.model) return s.model;
+  if (s.state === "running" && s.model) {
+    return modeLabel(s.apiKeySource) + " · " + s.model;
+  }
+  if (s.state === "starting") return modeLabel(s.apiKeySource);
   if (s.state === "disabled") return "Enable in settings";
   if (s.state === "no_key") return "Configure API key";
   if (s.state === "failed") return "Click to see details";
-  if (s.state === "starting") return "";
   if (s.state === "stopped") return "";
+  return "";
+}
+
+// Short label for the auth/runtime mode. The chat backend picks between
+// the Anthropic SDK (with an API key) and a `claude` CLI subprocess
+// fallback (OAuth Pro/Max session, no key needed).
+function modeLabel(apiKeySource) {
+  if (apiKeySource === "claude-cli") return "CLI";
+  if (apiKeySource) return "SDK";
   return "";
 }
 
@@ -71,7 +82,11 @@ function formatTooltip(s) {
       lines.push("Status: running");
       if (s.url) lines.push("URL: " + s.url);
       if (s.model) lines.push("Model: " + s.model);
-      if (s.apiKeySource) lines.push("API key: from " + s.apiKeySource);
+      if (s.apiKeySource === "claude-cli") {
+        lines.push("Auth: Claude Code CLI session (OAuth Pro/Max — no API key)");
+      } else if (s.apiKeySource) {
+        lines.push("Auth: Anthropic SDK — key from " + s.apiKeySource);
+      }
       lines.push("Click to open / copy URL.");
       break;
     case "disabled":

@@ -420,30 +420,28 @@ async function startBridge() {
   if (nova.config.get("claudecode.chat.enabled")) {
     try {
       const apiKey = await resolveChatApiKey();
-      if (apiKey) {
-        env.CC_CHAT_ENABLED = "1";
-        env.CC_CHAT_PORT    = String(nova.config.get("claudecode.chat.port") || 5180);
-        env.CC_CHAT_MODEL   = nova.config.get("claudecode.chat.model") || "claude-sonnet-4-6";
-        env.ANTHROPIC_API_KEY = apiKey;
-        console.log("Claude Code Bridge: chat enabled, port " + env.CC_CHAT_PORT + ", model " + env.CC_CHAT_MODEL);
+      env.CC_CHAT_ENABLED = "1";
+      env.CC_CHAT_PORT    = String(nova.config.get("claudecode.chat.port") || 5180);
+      env.CC_CHAT_MODEL   = nova.config.get("claudecode.chat.model") || "claude-sonnet-4-6";
+      // Pass the claude CLI path so chat-session.mjs can spawn it directly
+      // when running in fallback "cli" mode (no API key resolved).
+      env.CC_CLAUDE_PATH = nova.workspace.config.get("claudecode.claudeCommand") || "claude";
 
-        chatState.state = "starting";
-        chatState.port = parseInt(env.CC_CHAT_PORT, 10) || 5180;
-        chatState.model = env.CC_CHAT_MODEL;
+      if (apiKey) {
+        env.ANTHROPIC_API_KEY = apiKey;
+        console.log("Claude Code Bridge: chat enabled (SDK mode), port " + env.CC_CHAT_PORT + ", model " + env.CC_CHAT_MODEL);
         chatState.apiKeySource = await detectChatApiKeySource();
-        chatState.lastError = null;
-        chatState.url = "http://127.0.0.1:" + chatState.port + "/";
-        refreshChatStatusSidebar();
       } else {
-        console.warn("Claude Code Bridge: chat enabled but no API key resolved — chat will be disabled");
-        chatState.state = "no_key";
-        chatState.lastError = null;
-        refreshChatStatusSidebar();
-        showNotification(
-          "Chat key missing",
-          "Chat UI is enabled but no Anthropic API key was found.\nConfigure 'Anthropic API Key — 1Password reference' or the direct key in Extension Settings."
-        );
+        console.log("Claude Code Bridge: chat enabled (CLI fallback — no API key), port " + env.CC_CHAT_PORT + ", model " + env.CC_CHAT_MODEL);
+        chatState.apiKeySource = "claude-cli";
       }
+
+      chatState.state = "starting";
+      chatState.port = parseInt(env.CC_CHAT_PORT, 10) || 5180;
+      chatState.model = env.CC_CHAT_MODEL;
+      chatState.lastError = null;
+      chatState.url = "http://127.0.0.1:" + chatState.port + "/";
+      refreshChatStatusSidebar();
     } catch (err) {
       console.error("Claude Code Bridge: chat API key resolution failed:", err.message);
       chatState.state = "failed";
