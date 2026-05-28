@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.10.0 — 2026-05-28
+
+### Added
+- **"Open in Nova Preview" — chat now docks inside Nova.** The
+  "Open Claude Chat in Browser" command's action panel gained a new
+  first button that writes an iframe wrapper (`chat-frame.html`) into
+  the extension's global storage and opens it as an editor tab. From
+  there, `Cmd+Shift+H` shows the chat in Nova's WebKit Preview tab —
+  drag the Preview tab to the right edge to dock it as a side panel,
+  similar to VSCode's beside-panel webview. The other panel buttons
+  (Open in Browser / Copy URL / Close) are preserved.
+- The wrapper file is **idempotently regenerated**: only rewritten
+  when missing, unreadable, or pointing at a stale URL (port change).
+  User customizations (background, title, extra styles) survive
+  across re-opens.
+
+### Notes
+- Nova does not expose a programmatic split-right + preview API
+  (verified: AppleScript dictionary is minimal, `nova://` URL scheme
+  is OAuth-only, UI scripting via System Events would require
+  Accessibility permission). The wrapper-file + `Cmd+Shift+H`
+  keypress is the closest approximation available today.
+
 ## 0.9.0 — 2026-05-28
 
 ### Added
