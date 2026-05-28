@@ -1,5 +1,95 @@
 # Changelog
 
+## 0.6.0 — 2026-05-28
+
+### Added
+- **Chat UI (Mode B — opt-in, experimental).** In-browser chat powered
+  by the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk` v0.3.x),
+  served on a fixed port (default 5180) by an HTTP+WS server embedded
+  in `ws-server.js`. Coexists with the existing CLI bridge (Mode A) —
+  both can run side-by-side. Open in Safari/Firefox or configure
+  Nova's Preview tab to use it inline. New command
+  `Claude Code: Open Claude Chat in Browser` shows an action panel
+  with Copy URL / Open in Browser actions.
+- **Twelve Nova editor tools exposed in-process to the SDK** via
+  `createSdkMcpServer({ tools: [...] })` — `nova_openFile`,
+  `nova_openDiff`, `nova_getCurrentSelection`, `nova_getLatestSelection`,
+  `nova_getOpenEditors`, `nova_getWorkspaceFolders`,
+  `nova_checkDocumentDirty`, `nova_saveDocument`, `nova_getDiagnostics`,
+  `nova_close_tab`, `nova_closeAllDiffTabs`, `nova_executeCode`. Each
+  wrapper round-trips through the existing `ws-server.js` ↔ `main.js`
+  JSON-line protocol via a shared `pendingRequests` map dispatched by
+  `kind: "mcp" | "chat"` — zero duplication of the editor-side
+  plumbing.
+- **1Password CLI key resolution** at extension activation.
+  `claudecode.chat.apiKey1PassRef` (e.g.
+  `op://Private/Anthropic API Key/credential`) runs `op read` to
+  fetch the Anthropic key without storing it in extension config or
+  Nova settings. Falls back to `claudecode.chat.apiKey` for users
+  without 1Password CLI.
+- **Cost-tuned defaults.** Sonnet 4.6 (default), `tools: []` (disables
+  the 115 built-in Claude Code tools), `settingSources: []` (SDK
+  isolation — no CLAUDE.md / skills / rules auto-load), wildcard
+  `allowedTools: ["mcp__nova__*"]` for trusted Nova tools. Typical
+  cost: ~$0.01–0.02 per multi-step interaction (vs ~$0.67 with
+  defaults).
+- **New config keys** : `claudecode.chat.enabled`,
+  `claudecode.chat.apiKey1PassRef`, `claudecode.chat.apiKey`,
+  `claudecode.chat.model` (Sonnet/Haiku/Opus), `claudecode.chat.port`.
+- **New sidebar section "Chat UI"** with the open-chat header
+  command — placeholder text for now, live status display planned.
+- **Claude Code CLI version check & update flow.** New command
+  `Claude Code: Check for Updates` (Extensions menu + sidebar header)
+  surfaces the installed CLI version, compares it against the npm
+  registry, and offers a one-click update with automatic bridge
+  stop/restart.
+- **Daily auto-check at activation**, throttled to 24h via
+  `claudecode.updateCheck.lastCheckedAt`. Silent on success, notifies
+  only when an update is available or when Claude Code is missing.
+  Toggle via the new `claudecode.updateCheck.autoCheck` setting.
+- **`stable` / `next` channel toggle** — `claudecode.updateCheck.channel`
+  picks which npm `dist-tag` to compare against. `next` surfaces
+  pre-releases; the comparator handles `X.Y.Z-beta.N` correctly (release
+  sorts higher than pre-release per semver).
+- **New sidebar section "Claude Code Version"** showing live state
+  (up-to-date / update available / not installed / unknown / checking)
+  with state-driven icon. Clicking the row triggers a check.
+- **"Not installed" UX** — when the CLI is absent, the notification
+  offers `Install Guide` (docs URL via `nova.openURL`),
+  `Configure Path` (opens extension settings on
+  `claudecode.claudeCommand`), `Install via npm` (only shown when `npm`
+  is on PATH), and `Don't Show Again` (sets
+  `claudecode.updateCheck.suppressNotInstalled`). The bridge keeps
+  running — Claude Code is only required to launch the CLI from Nova.
+- **Update execution prefers `claude update`** (the integrated updater),
+  falls back to `npm update -g @anthropic-ai/claude-code` or
+  `brew upgrade claude-code` based on the binary's resolved path. On
+  failure, the bridge is left **not** restarted so the user stays in a
+  stable state; a `Copy Log` action exposes stdout+stderr for triage.
+
+### Internal
+- New modules `Scripts/update-check.js` (~270 lines, pure logic — no
+  Nova globals beyond `Process` / `fetch` / `nova.fs.stat`) and
+  `Scripts/version-tree-provider.js` (~95 lines).
+- New chat backend modules `Scripts/chat-session.mjs` (HTTP+WS server,
+  SDK loop) and `Scripts/chat-tool-wrappers.mjs` (12 in-process tool
+  wrappers). Static chat UI in `Scripts/chat-ui/` (HTML/CSS/JS, no
+  build step ; marked + highlight.js via CDN for now).
+- `Scripts/package.json` declares chat deps : `@anthropic-ai/claude-agent-sdk`,
+  `ws`, `zod`. `node_modules/` ships ~50 MB unbundled ; esbuild
+  bundling deferred to a later release.
+- `Scripts/ws-server.js` extended : env-driven chat opt-in (`CC_CHAT_*`),
+  shared `pendingRequests` map with `kind` dispatch, lazy
+  `await import("./chat-session.mjs")` only when `chat.enabled=true`.
+- Both `main.js` (root) and `Scripts/main.js` updated; require paths
+  differ between the two (`./Scripts/…` vs `./…`) — only documented
+  delta to keep them functionally identical. Added `resolveChatApiKey()`,
+  `runOpRead()`, `openChatHandler()`, async `startBridge()`, and new
+  `chat_started` / `chat_failed` server-message dispatch.
+- Spike directories `spike/m0-node-pty/`, `spike/m1-agent-sdk/`,
+  `spike/m2-chat-ui/` archived in-repo for reference. Each contains
+  a `SPIKE.md` documenting findings ; `node_modules/` gitignored.
+
 ## 0.5.0 — 2026-05-15
 
 ### Changed

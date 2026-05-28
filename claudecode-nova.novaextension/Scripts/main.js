@@ -7,7 +7,13 @@
  *   3. Maps MCP tool calls to Nova editor APIs
  *   4. Tracks editor selection and broadcasts changes
  *   5. Provides sidebar UI and commands
+ *   6. Checks the Claude Code CLI for updates (manual + 24h auto)
  */
+
+const UpdateCheck = require("./update-check.js");
+const { VersionTreeProvider } = require("./version-tree-provider.js");
+
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h auto-check throttle
 
 // ---------------------------------------------------------------------------
 // State
@@ -42,6 +48,21 @@ let gitBranch = null;
 let gitBranchTimer = null;
 const GIT_BRANCH_REFRESH_MS = 5 * 60 * 1000;
 
+// Claude Code CLI version state. Mutated by checkForUpdates() and read by
+// the sidebar provider — same object reference passed both ways so the
+// provider always reflects the latest snapshot after a reload().
+let versionState = {
+  state: "unknown",
+  currentVersion: null,
+  latestVersion: null,
+  channel: "stable",
+  lastCheckedAt: null,
+  message: null,
+};
+let versionProvider = null;
+let versionTree = null;
+let updateInProgress = false;
+
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
@@ -64,6 +85,8 @@ exports.activate = function() {
       nova.commands.register("claudecode.diffReject", diffRejectHandler),
       nova.commands.register("claudecode.diffShowDetails", diffShowDetailsHandler),
       nova.commands.register("claudecode.sidebarRefresh", sidebarRefreshHandler),
+      nova.commands.register("claudecode.checkForUpdates", function() { checkForUpdates(false); }),
+      nova.commands.register("claudecode.openChat", openChatHandler),
     );
     console.log("Claude Code Bridge: commands registered");
   } catch (err) {
@@ -83,13 +106,16 @@ exports.activate = function() {
 
   const autoStart = nova.config.get("claudecode.autoStart");
   if (autoStart !== false) {
-    try {
-      startBridge();
-    } catch (err) {
+    // Chat key resolution may need an `op read` round-trip, so startBridge is
+    // now async. Fire-and-forget — no caller awaits the return.
+    startBridge().catch((err) => {
       console.error("Claude Code Bridge: startBridge() failed:", err.message, err.stack || "");
       showNotification("Error", `Failed to start bridge: ${err.message}`);
-    }
+    });
   }
+
+  // Fire-and-forget: never block activate() on a network round-trip.
+  maybeAutoCheckUpdates();
 
   console.log("Claude Code Bridge: activation complete");
 };
@@ -139,10 +165,96 @@ function resolveNodePath() {
 }
 
 // ---------------------------------------------------------------------------
+// Chat (Mode B) — opt-in chat UI helpers
+// ---------------------------------------------------------------------------
+
+// Resolve the Anthropic API key for chat mode. Tries 1Password CLI first
+// (via `op read <ref>`), falls back to the direct config value. Returns
+// the key string, or empty string if no source is configured / op fails.
+async function resolveChatApiKey() {
+  const opRef  = (nova.config.get("claudecode.chat.apiKey1PassRef") || "").trim();
+  const direct = (nova.config.get("claudecode.chat.apiKey") || "").trim();
+
+  if (opRef) {
+    try {
+      const key = await runOpRead(opRef);
+      if (key) return key;
+    } catch (err) {
+      console.warn("Claude Code Bridge: op read failed (" + err.message + ") — falling back to direct key");
+    }
+  }
+
+  return direct;
+}
+
+// Run `op read <ref>` and capture stdout. Resolves with the trimmed output
+// on exit 0, rejects on non-zero exit or spawn failure.
+function runOpRead(ref) {
+  return new Promise((resolve, reject) => {
+    const proc = new Process("/usr/bin/env", {
+      args: ["op", "read", ref],
+      shell: false,
+      stdio: "pipe",
+    });
+    let out = "";
+    let err = "";
+    proc.onStdout(function(chunk) { out += chunk; });
+    proc.onStderr(function(chunk) { err += chunk; });
+    proc.onDidExit(function(code) {
+      if (code === 0) resolve(out.trim());
+      else reject(new Error("op exit code " + code + ": " + err.trim()));
+    });
+    try {
+      proc.start();
+    } catch (spawnErr) {
+      reject(new Error("Cannot spawn op CLI: " + spawnErr.message));
+    }
+  });
+}
+
+// "Open Claude Chat in Browser" command — shows the chat URL with copy and
+// browser-open actions. Guides the user to configure Nova Project Settings
+// (Preview URL) so the chat can live inside Nova's Preview tab.
+function openChatHandler() {
+  if (!nova.config.get("claudecode.chat.enabled")) {
+    nova.workspace.showActionPanel(
+      "Chat UI is currently disabled.",
+      { buttons: ["Open Settings", "Cancel"] },
+      function(idx) {
+        if (idx === 0) nova.openConfig(nova.extension.identifier);
+      },
+    );
+    return;
+  }
+
+  const port = nova.config.get("claudecode.chat.port") || 5180;
+  const url  = "http://127.0.0.1:" + port + "/";
+
+  nova.workspace.showActionPanel(
+    "Claude Chat UI\n\n" + url + "\n\nTo use inside Nova's Preview tab, configure\nProject Settings → Web → Preview URL to the URL above.",
+    { buttons: ["Copy URL", "Open in Browser", "Close"] },
+    function(idx) {
+      if (idx === 0) {
+        nova.clipboard.writeText(url);
+        showNotification("Copied", url + " is in your clipboard.");
+      } else if (idx === 1) {
+        // Best-effort: spawn `open <url>` (macOS) to launch the default browser.
+        try {
+          const proc = new Process("/usr/bin/open", { args: [url], stdio: "ignore" });
+          proc.start();
+        } catch (err) {
+          showNotification("Cannot open browser", err.message);
+        }
+      }
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Bridge lifecycle
 // ---------------------------------------------------------------------------
 
-function startBridge() {
+async function startBridge() {
   if (serverProcess) {
     console.log("Claude Code Bridge: already running");
     showNotification("Already Running", "Claude Code Bridge is already active.");
@@ -161,14 +273,40 @@ function startBridge() {
   console.log("  Script: " + scriptPath);
   console.log("  Workspace: " + workspace);
 
+  // Build env. If chat (Mode B) is opt-in, resolve the API key first
+  // (1Password reference or direct config value) and add the CC_CHAT_* vars
+  // so ws-server.js lazy-loads chat-session.mjs at startup.
+  const env = {
+    CC_PORT_MIN: String(portMin),
+    CC_PORT_MAX: String(portMax),
+    CC_WORKSPACE: workspace,
+  };
+
+  if (nova.config.get("claudecode.chat.enabled")) {
+    try {
+      const apiKey = await resolveChatApiKey();
+      if (apiKey) {
+        env.CC_CHAT_ENABLED = "1";
+        env.CC_CHAT_PORT    = String(nova.config.get("claudecode.chat.port") || 5180);
+        env.CC_CHAT_MODEL   = nova.config.get("claudecode.chat.model") || "claude-sonnet-4-6";
+        env.ANTHROPIC_API_KEY = apiKey;
+        console.log("Claude Code Bridge: chat enabled, port " + env.CC_CHAT_PORT + ", model " + env.CC_CHAT_MODEL);
+      } else {
+        console.warn("Claude Code Bridge: chat enabled but no API key resolved — chat will be disabled");
+        showNotification(
+          "Chat key missing",
+          "Chat UI is enabled but no Anthropic API key was found.\nConfigure 'Anthropic API Key — 1Password reference' or the direct key in Extension Settings."
+        );
+      }
+    } catch (err) {
+      console.error("Claude Code Bridge: chat API key resolution failed:", err.message);
+    }
+  }
+
   try {
     serverProcess = new Process(nodePath, {
       args: [scriptPath],
-      env: {
-        CC_PORT_MIN: String(portMin),
-        CC_PORT_MAX: String(portMax),
-        CC_WORKSPACE: workspace,
-      },
+      env,
       cwd: workspace || undefined,
       stdio: "pipe",
     });
@@ -320,6 +458,19 @@ function handleServerMessage(msg) {
       } else {
         console.log("[ws-server] " + msg.message);
       }
+      break;
+
+    case "chat_started":
+      console.log("Claude Code Bridge: chat server started on port " + msg.port);
+      showNotification(
+        "Chat UI ready",
+        "Claude chat is live at http://127.0.0.1:" + msg.port + "/.\nUse \"Open Claude Chat in Browser\" command to open it, or configure Nova Project Settings → Preview URL."
+      );
+      break;
+
+    case "chat_failed":
+      console.error("Claude Code Bridge: chat server failed — " + msg.message);
+      showNotification("Chat UI failed to start", msg.message);
       break;
   }
 }
@@ -1035,9 +1186,21 @@ function ensureActivitySidebars() {
       });
       disposables.push(activityTree);
     }
+    if (!versionProvider) {
+      versionProvider = new VersionTreeProvider(versionState);
+      versionTree = new TreeView("claudecode.sidebar.version", {
+        dataProvider: versionProvider,
+      });
+      disposables.push(versionTree);
+    }
   } catch (err) {
     console.error("Claude Code Bridge: activity sidebar init failed:", err.message);
   }
+}
+
+function refreshVersionSidebar() {
+  ensureActivitySidebars();
+  try { if (versionTree) versionTree.reload(); } catch (_) {}
 }
 
 // Reload both activity-related sections. Called after every event that
@@ -1624,6 +1787,286 @@ function runAppleScript(script) {
       reject(err);
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code CLI version check & update
+// ---------------------------------------------------------------------------
+//
+// Three entry points feed the same pipeline:
+//   1. activate() → maybeAutoCheckUpdates() — silent, throttled to 24h.
+//   2. Command "Claude Code: Check for Updates" → checkForUpdates(false).
+//   3. Sidebar click on the version row → checkForUpdates(false).
+//
+// `silent=true` suppresses all notifications EXCEPT the "update available"
+// one — that's the whole point of the daily auto-check.
+
+function maybeAutoCheckUpdates() {
+  if (nova.config.get("claudecode.updateCheck.autoCheck") === false) return;
+  const last = nova.config.get("claudecode.updateCheck.lastCheckedAt") || 0;
+  if (Date.now() - last < UPDATE_CHECK_INTERVAL_MS) return;
+  checkForUpdates(true).catch(function(err) {
+    console.warn("Claude Code Bridge: auto-check failed:", err.message);
+  });
+}
+
+async function checkForUpdates(silent) {
+  const claudeCommand = nova.workspace.config.get("claudecode.claudeCommand") || "claude";
+  const channel = nova.config.get("claudecode.updateCheck.channel") || "stable";
+  versionState.channel = channel;
+
+  if (!silent) {
+    versionState.state = "checking";
+    versionState.message = null;
+    refreshVersionSidebar();
+  }
+
+  let current;
+  try {
+    current = await UpdateCheck.getCurrentVersion(claudeCommand);
+  } catch (err) {
+    console.error("Claude Code Bridge: getCurrentVersion failed:", err.message);
+    versionState.state = "error";
+    versionState.message = err.message;
+    refreshVersionSidebar();
+    if (!silent) showNotification("Update Check Failed", err.message);
+    persistLastChecked();
+    return;
+  }
+
+  if (current.state === "not_installed") {
+    versionState.state = "not_installed";
+    versionState.currentVersion = null;
+    versionState.message = "Claude Code CLI was not found on PATH.";
+    refreshVersionSidebar();
+    presentNotInstalled(silent);
+    persistLastChecked();
+    return;
+  }
+
+  if (current.state === "unknown") {
+    versionState.state = "unknown";
+    versionState.currentVersion = null;
+    versionState.message = current.error || current.raw || "Unparsable version output.";
+    refreshVersionSidebar();
+    if (!silent) {
+      showNotification("Version Unknown",
+        "Could not parse `claude --version` output: " + versionState.message);
+    }
+    persistLastChecked();
+    return;
+  }
+
+  versionState.currentVersion = current.version;
+
+  let latest;
+  try {
+    latest = await UpdateCheck.getLatestVersion(channel);
+  } catch (err) {
+    versionState.state = "error";
+    versionState.message = err.message;
+    refreshVersionSidebar();
+    if (!silent) showNotification("Update Check Failed", err.message);
+    persistLastChecked();
+    return;
+  }
+
+  versionState.latestVersion = latest.version;
+  const cmp = UpdateCheck.semverCompare(current.version, latest.version);
+  persistLastChecked();
+
+  if (cmp === null) {
+    versionState.state = "unknown";
+    versionState.message = "Could not compare versions (" + current.version + " vs " + latest.version + ").";
+    refreshVersionSidebar();
+    return;
+  }
+
+  if (cmp >= 0) {
+    versionState.state = "up_to_date";
+    versionState.message = null;
+    refreshVersionSidebar();
+    if (!silent) {
+      showNotification("Up to Date", "Claude Code is up to date (v" + current.version + ").");
+    }
+    return;
+  }
+
+  // Update available — always notify, even on silent auto-check.
+  versionState.state = "update_available";
+  versionState.message = "Update available: v" + current.version + " → v" + latest.version;
+  refreshVersionSidebar();
+  presentUpdateAvailable(current, latest);
+}
+
+function presentUpdateAvailable(current, latest) {
+  const req = new NotificationRequest("claudecode-update-available");
+  req.title = "Claude Code Update Available";
+  req.body = "v" + current.version + " → v" + latest.version + ".\nUpdate will stop and restart the bridge.";
+  req.actions = ["Update Now", "Release Notes", "Later"];
+
+  nova.notifications.add(req).then(function(response) {
+    if (response.actionIdx === 0) {
+      const method = UpdateCheck.detectInstallMethod(current.path);
+      runUpdateFlow(method);
+    } else if (response.actionIdx === 1) {
+      const url = "https://github.com/anthropics/claude-code/releases/tag/v" + latest.version;
+      try { nova.openURL(url); }
+      catch (err) {
+        nova.clipboard.writeText(url);
+        showNotification("Release Notes", "URL copied to clipboard: " + url);
+      }
+    }
+    // "Later" → no-op; user can re-check via the sidebar or command.
+  });
+}
+
+async function presentNotInstalled(silent) {
+  if (silent && nova.config.get("claudecode.updateCheck.suppressNotInstalled") === true) {
+    return;
+  }
+
+  const npmOk = !silent && (await UpdateCheck.isNpmAvailable());
+
+  const req = new NotificationRequest("claudecode-not-installed");
+  req.title = "Claude Code CLI Not Found";
+  req.body = "The Claude Code CLI is not on PATH. The bridge runs without it, but you'll need it to launch Claude from Nova.";
+  req.actions = ["Install Guide", "Configure Path"];
+  if (npmOk) req.actions.push("Install via npm");
+  if (silent) req.actions.push("Don't Show Again");
+
+  nova.notifications.add(req).then(function(response) {
+    const action = req.actions[response.actionIdx];
+    if (action === "Install Guide") {
+      const url = "https://docs.anthropic.com/claude-code/install";
+      try { nova.openURL(url); }
+      catch (_) {
+        nova.clipboard.writeText(url);
+        showNotification("Install Guide", "URL copied to clipboard: " + url);
+      }
+    } else if (action === "Configure Path") {
+      try { nova.workspace.openConfig(nova.extension.identifier); }
+      catch (err) {
+        showNotification("Open Settings", "Could not open extension settings: " + err.message);
+      }
+    } else if (action === "Install via npm") {
+      runInstallFlow();
+    } else if (action === "Don't Show Again") {
+      nova.config.set("claudecode.updateCheck.suppressNotInstalled", true);
+    }
+  });
+}
+
+async function runUpdateFlow(method) {
+  if (updateInProgress) {
+    showNotification("Update In Progress", "An update is already running.");
+    return;
+  }
+  updateInProgress = true;
+
+  const wasRunning = !!serverProcess;
+  if (wasRunning) {
+    stopBridge();
+    await delay(500); // give the OS a moment to release the port
+  }
+
+  showNotification("Updating", "Updating Claude Code… the bridge will restart automatically.");
+  const claudeCommand = nova.workspace.config.get("claudecode.claudeCommand") || "claude";
+
+  let result;
+  try {
+    result = await UpdateCheck.runUpdate(method, claudeCommand);
+  } catch (err) {
+    console.error("Claude Code Bridge: update threw:", err.message);
+    result = { success: false, stderr: err.message };
+  }
+
+  updateInProgress = false;
+
+  if (result.success) {
+    // Re-probe the new version so the sidebar reflects reality.
+    try {
+      const current = await UpdateCheck.getCurrentVersion(claudeCommand);
+      if (current.state === "installed") {
+        versionState.currentVersion = current.version;
+        versionState.state = "up_to_date";
+        versionState.message = null;
+        refreshVersionSidebar();
+      }
+    } catch (_) {}
+
+    showNotification("Update Complete",
+      "Claude Code updated successfully" +
+      (versionState.currentVersion ? " to v" + versionState.currentVersion : "") + ".");
+
+    if (wasRunning) {
+      setTimeout(function() {
+        try { startBridge(); } catch (err) {
+          console.error("Claude Code Bridge: post-update restart failed:", err.message);
+          showNotification("Restart Failed", "Update succeeded but bridge restart failed: " + err.message);
+        }
+      }, 300);
+    }
+  } else {
+    // Don't auto-restart the bridge on failure — leave the user in a stable
+    // state so they can diagnose. The previous claude is still installed.
+    const stderr = (result.stderr || "").trim();
+    const req = new NotificationRequest("claudecode-update-failed");
+    req.title = "Claude Code Update Failed";
+    req.body = stderr ? stderr.slice(0, 500) : "Update command returned a non-zero exit code.";
+    req.actions = ["Copy Log", "OK"];
+    nova.notifications.add(req).then(function(response) {
+      if (response.actionIdx === 0) {
+        const full = "stdout:\n" + (result.stdout || "") + "\n\nstderr:\n" + (result.stderr || "");
+        nova.clipboard.writeText(full);
+      }
+    });
+  }
+}
+
+async function runInstallFlow() {
+  if (updateInProgress) {
+    showNotification("Install In Progress", "An install is already running.");
+    return;
+  }
+  updateInProgress = true;
+  showNotification("Installing", "Installing @anthropic-ai/claude-code globally via npm…");
+
+  let result;
+  try {
+    result = await UpdateCheck.installViaNpm();
+  } catch (err) {
+    result = { success: false, stderr: err.message };
+  }
+  updateInProgress = false;
+
+  if (result.success) {
+    showNotification("Install Complete", "Claude Code installed. Run \"Check for Updates\" to refresh the sidebar.");
+    // Trigger a re-check so the sidebar updates without user action.
+    checkForUpdates(true).catch(function(_) {});
+  } else {
+    const req = new NotificationRequest("claudecode-install-failed");
+    req.title = "Install Failed";
+    req.body = (result.stderr || "npm install exited with a non-zero code.").slice(0, 500);
+    req.actions = ["Copy Log", "OK"];
+    nova.notifications.add(req).then(function(response) {
+      if (response.actionIdx === 0) {
+        nova.clipboard.writeText("stdout:\n" + (result.stdout || "") + "\n\nstderr:\n" + (result.stderr || ""));
+      }
+    });
+  }
+}
+
+function persistLastChecked() {
+  try {
+    nova.config.set("claudecode.updateCheck.lastCheckedAt", Date.now());
+    if (versionState.currentVersion) {
+      nova.config.set("claudecode.updateCheck.lastSeenVersion", versionState.currentVersion);
+    }
+  } catch (err) {
+    console.warn("Claude Code Bridge: could not persist lastCheckedAt:", err.message);
+  }
+  versionState.lastCheckedAt = Date.now();
 }
 
 // ---------------------------------------------------------------------------

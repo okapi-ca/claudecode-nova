@@ -1,0 +1,14 @@
+{
+  "name": "m0-node-pty-spike",
+  "version": "0.0.0",
+  "private": true,
+  "description": "M0 spike — validate node-pty loads + spawns claude in a Nova-like subprocess",
+  "scripts": {
+    "test:basic": "node test1-basic.js",
+    "test:claude": "node test2-claude.js",
+    "test:isolated": "node test3-isolated.js"
+  },
+  "dependencies": {
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1"
+  }
+}

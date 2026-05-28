@@ -27,6 +27,16 @@ const PORT_MAX  = parseInt(process.env.CC_PORT_MAX  || "65535", 10);
 const WORKSPACE = process.env.CC_WORKSPACE || process.cwd();
 const IDE_NAME  = "Nova";
 
+// Chat UI (Mode B — opt-in chat panel in Nova Preview tab).
+// Enabled when CC_CHAT_ENABLED=1 is set by main.js at spawn time.
+// API key flows via ANTHROPIC_API_KEY (resolved from 1Password / Keychain
+// in main.js before spawning this subprocess).
+const CHAT_ENABLED = process.env.CC_CHAT_ENABLED === "1" || process.env.CC_CHAT_ENABLED === "true";
+const CHAT_PORT    = parseInt(process.env.CC_CHAT_PORT || "5180", 10);
+const CHAT_MODEL   = process.env.CC_CHAT_MODEL || "claude-sonnet-4-6";
+const CHAT_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+let chatHandle = null;  // { port, stop() } once chat-session.mjs is initialized
+
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
@@ -420,32 +430,61 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
+// Format a Nova tool result into the MCP `content` payload shape.
+// Pure function — used by both the MCP path and the chat path.
+function formatToolResultPayload(result) {
+  const isErr = result && typeof result === "object" && result.error;
+  const text = (typeof result === "string")
+    ? result
+    : JSON.stringify(isErr ? { error: result.error } : result);
+  const payload = { content: [{ type: "text", text }] };
+  if (isErr) payload.isError = true;
+  return payload;
+}
+
+// Chat-originated Nova tool call. Returns a Promise that resolves with the
+// MCP-shaped payload when main.js sends back the tool_result. Shares the
+// pendingRequests map with the MCP path via `kind: "chat"`.
+function callNovaTool(toolName, args) {
+  return new Promise((resolve, reject) => {
+    const requestId = `chat_req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const timeout = setTimeout(() => {
+      if (pendingRequests[requestId]) {
+        delete pendingRequests[requestId];
+        reject(new Error(`Nova tool ${toolName} timed out`));
+      }
+    }, 30000);
+    pendingRequests[requestId] = { kind: "chat", resolve, reject, timeout };
+    sendToNova({
+      type: "tool_call",
+      requestId,
+      tool: toolName,
+      arguments: args,
+    });
+  });
+}
+
 function handleNovaMessage(msg) {
-  // Tool result from Nova
+  // Tool result from Nova — dispatch by kind to the right resolver
   if (msg.type === "tool_result" && msg.requestId) {
     const pending = pendingRequests[msg.requestId];
     if (pending) {
       clearTimeout(pending.timeout);
       delete pendingRequests[msg.requestId];
 
-      // Spec output formats vary per tool: some return plain strings
-      // ("TAB_CLOSED", "Opened file: /path"), others return JSON-stringified
-      // objects. Preserve the handler's intent: a string result becomes the
-      // text verbatim, an object/array gets JSON-stringified, and an error
-      // surfaces via isError per MCP convention.
-      const r = msg.result;
-      const isErr = r && typeof r === "object" && r.error;
-      const text = (typeof r === "string")
-        ? r
-        : JSON.stringify(isErr ? { error: r.error } : r);
-      const payload = { content: [{ type: "text", text }] };
-      if (isErr) payload.isError = true;
+      const payload = formatToolResultPayload(msg.result);
 
-      sendWSMessage(pending.client, {
-        jsonrpc: "2.0",
-        id: pending.mcpId,
-        result: payload,
-      });
+      if (pending.kind === "chat") {
+        // Chat-originated — resolve the Promise the chat tool wrapper awaits
+        pending.resolve(payload);
+      } else {
+        // MCP-originated (default — backward compat) — send WS response
+        sendWSMessage(pending.client, {
+          jsonrpc: "2.0",
+          id: pending.mcpId,
+          result: payload,
+        });
+      }
     }
     return;
   }
@@ -633,7 +672,7 @@ async function startServer() {
     });
   });
 
-  httpServer.listen(port, "127.0.0.1", () => {
+  httpServer.listen(port, "127.0.0.1", async () => {
     lockFilePath = writeLockFile(port, authToken);
     log("info", `WebSocket MCP server listening on 127.0.0.1:${port}`);
     sendToNova({
@@ -642,6 +681,30 @@ async function startServer() {
       lockFile: lockFilePath,
       authToken,
     });
+
+    // Conditionally start the chat module (Mode B — opt-in chat UI).
+    // Wrapped in try/catch so a chat init failure never kills the MCP server.
+    if (CHAT_ENABLED) {
+      if (!CHAT_API_KEY) {
+        log("error", "Chat enabled (CC_CHAT_ENABLED=1) but ANTHROPIC_API_KEY missing — chat disabled");
+      } else {
+        try {
+          const chatModule = await import("./chat-session.mjs");
+          chatHandle = await chatModule.init({
+            port: CHAT_PORT,
+            apiKey: CHAT_API_KEY,
+            model: CHAT_MODEL,
+            callNovaTool,
+            log,
+          });
+          log("info", `Chat server listening on http://127.0.0.1:${CHAT_PORT}/`);
+          sendToNova({ type: "chat_started", port: CHAT_PORT });
+        } catch (err) {
+          log("error", `Failed to start chat server: ${err.message}`);
+          sendToNova({ type: "chat_failed", message: err.message });
+        }
+      }
+    }
   });
 
   // Cleanup on exit
@@ -649,6 +712,9 @@ async function startServer() {
     if (serverPort) removeLockFile(serverPort);
     for (const client of connectedClients) {
       try { client.socket.destroy(); } catch (_) {}
+    }
+    if (chatHandle) {
+      try { chatHandle.stop(); } catch (_) {}
     }
     process.exit(0);
   }
