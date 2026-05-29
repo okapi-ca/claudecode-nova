@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.14.1 — 2026-05-29
+
+### Fixed
+- **Screenshot was broken on Panic Extension Library.** The
+  renderer doesn't resolve relative image paths inside the
+  `.novaextension` bundle reliably, so the v0.14.0 README showed
+  a broken-image icon. Switched the bundle README to an absolute
+  `https://raw.githubusercontent.com/...` URL that loads at render
+  time, and removed the now-unused 2.8 MB copy from
+  `Images/screenshot.png`. `docs/screenshot.png` at the repo root
+  is kept for the GitHub README.
+
 ## 0.14.0 — 2026-05-29
 
 ### Added
