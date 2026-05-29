@@ -11,6 +11,6 @@
     "zod": "^4.0.0"
   },
   "scripts": {
-    "postinstall": "bash -c 'rm -rf node_modules/.bin; rm -rf node_modules/node-pty/prebuilds/win32-* 2>/dev/null; rm -rf node_modules/node-pty/prebuilds/linux-* 2>/dev/null; chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true'"
+    "postinstall": "bash -c 'rm -rf node_modules/.bin; rm -rf node_modules/node-pty/prebuilds/win32-* 2>/dev/null; rm -rf node_modules/node-pty/prebuilds/linux-* 2>/dev/null; rm -rf node_modules/node-pty/prebuilds/darwin-x64 2>/dev/null; chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true'"
   }
 }
