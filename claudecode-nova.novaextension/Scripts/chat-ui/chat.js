@@ -342,26 +342,19 @@ function connect() {
 
 function handleServerMessage(msg) {
   switch (msg.type) {
+    case "config":
+      // Sent once right after the WS connection opens. Pre-populates
+      // the model picker and mode badge so they reflect the backend's
+      // actual default before any session_started event arrives.
+      if (msg.defaultModel && modelPicker) {
+        modelPicker.value = stripModelSuffix(msg.defaultModel);
+      }
+      applyModeBadge(msg.mode);
+      break;
+
     case "session_started":
       metaSess.textContent = `session ${msg.sessionId.slice(0, 8)}…`;
-      // Show the auth/runtime mode badge — CLI uses the Claude Code
-      // OAuth session (no API key, covered by subscription); SDK uses
-      // ANTHROPIC_API_KEY and bills per-call. The user wants this
-      // distinction visible at a glance because it determines whether
-      // the cost figure below is billable or informative.
-      if (metaMode) {
-        if (msg.mode === "cli") {
-          metaMode.textContent = "CLI";
-          metaMode.title = "Claude Code OAuth session — covered by subscription";
-          metaMode.className = "meta-mode meta-mode--cli";
-          metaMode.hidden = false;
-        } else if (msg.mode === "sdk") {
-          metaMode.textContent = "SDK";
-          metaMode.title = "Anthropic API key — billed per token";
-          metaMode.className = "meta-mode meta-mode--sdk";
-          metaMode.hidden = false;
-        }
-      }
+      applyModeBadge(msg.mode);
       // Sync the picker to the model the backend actually started with —
       // it may differ from the picker's default if the user configured
       // something else in extension settings. Don't fire `change`.
@@ -586,6 +579,23 @@ if (modelPicker) {
 // the suffix before assigning so the option stays selected.
 function stripModelSuffix(m) {
   return m.replace(/\[[^\]]+\]$/, "");
+}
+
+// Render the auth/runtime mode badge (CLI vs SDK) into the meta bar.
+// Shared between the initial `config` event and per-session updates.
+function applyModeBadge(mode) {
+  if (!metaMode) return;
+  if (mode === "cli") {
+    metaMode.textContent = "CLI";
+    metaMode.title = "Claude Code OAuth session — covered by subscription";
+    metaMode.className = "meta-mode meta-mode--cli";
+    metaMode.hidden = false;
+  } else if (mode === "sdk") {
+    metaMode.textContent = "SDK";
+    metaMode.title = "Anthropic API key — billed per token";
+    metaMode.className = "meta-mode meta-mode--sdk";
+    metaMode.hidden = false;
+  }
 }
 
 // ── boot ──────────────────────────────────────────────────────────

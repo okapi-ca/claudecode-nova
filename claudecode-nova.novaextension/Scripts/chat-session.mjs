@@ -301,6 +301,13 @@ export async function init(opts) {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
     };
 
+    // Push the current config to the client immediately so the model
+    // picker and mode badge reflect reality before the first session
+    // event. Without this the picker shows its first <option> (Sonnet)
+    // until the user sends a message, even if a different model is
+    // configured in extension settings.
+    send({ type: "config", defaultModel: model, mode: chatMode });
+
     socket.on("message", async (raw) => {
       let msg;
       try { msg = JSON.parse(raw.toString("utf8")); }
