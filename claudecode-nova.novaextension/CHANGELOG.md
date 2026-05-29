@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.12.0 — 2026-05-28
+
+### Added
+- **Model picker + mode badge now reflect the configured default
+  immediately on chat load.** A new `{type: "config", defaultModel,
+  mode}` WS event is pushed the moment a client connects, before
+  any `session_started`. The picker syncs to whatever you set in
+  `claudecode.chat.model` (e.g. Opus 4.8) and the CLI / SDK badge
+  is rendered right away — no more "Sonnet 4.6 then jump to Opus"
+  flicker after the first message.
+
+### Changed
+- Refactored the badge-rendering inline block out of the
+  `session_started` handler into a reusable `applyModeBadge(mode)`
+  helper. Both the new `config` event and existing `session_started`
+  event share the same code path.
+
 ## 0.11.1 — 2026-05-28
 
 ### Fixed
