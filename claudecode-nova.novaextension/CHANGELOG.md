@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.13.0 — 2026-05-29
+
+### Added
+- **Embedded CLI terminal in the chat window.** node-pty +
+  xterm.js power a real PTY inside the same page that hosts the
+  chat. ws-server exposes a sibling `/cli` WebSocket alongside the
+  existing `/ws` and pipes input/output/resize/exit messages
+  between the browser terminal and a `claude` subprocess.
+- **Three-way layout toggle** in the topbar: **Chat** / **CLI** /
+  **Both**. In Both mode, the terminal sits on top of the chat
+  (CSS `order` swap) with a draggable horizontal splitter that
+  re-fits xterm and pings the PTY with the new dims as the user
+  drags.
+- **Persistent bottom statusbar** with two live readouts:
+  - **Bridge:** `port N · K clients` (green dot when the MCP
+    server is listening, count updates as Claude CLI instances
+    connect/disconnect on the bridge port).
+  - **Chat:** `MODE · model · port` (reflects the model picker and
+    the SDK/CLI mode in real time).
+- **`claudecode.chat.theme`** setting (`auto` / `dark` / `light`).
+  Nova doesn't expose its active theme to extensions, so users
+  whose Nova is locked to one theme while macOS uses the other
+  can force-match. All previous `@media
+  (prefers-color-scheme: light)` blocks were rewritten as
+  `:root[data-theme="light"]` scoped selectors so the JS override
+  works on every rule, not just the OS-driven branch. The xterm.js
+  terminal also follows via `syncTerminalTheme()`.
+
+### Changed
+- **Chrome restructure.** Topbar, panels frame, and composer share
+  a darker tone (`#15151a` dark / `#ececef` light) so the inner
+  chat and terminal panels read as elevated cards. The composer
+  is now nested inside a `.chat-panel` wrapper, so its input
+  stays glued to the chat history when the layout splits.
+- **`session_started`** event now carries a `mode` field so the UI
+  can label CLI vs SDK from the very first turn (previously had
+  to wait for the next config push).
+
+### Fixed
+- **`posix_spawnp failed` when spawning the embedded terminal's
+  `claude`** — node-pty's prebuilt `spawn-helper` ships without
+  the execute bit. The `postinstall` script now runs
+  `chmod +x node_modules/node-pty/prebuilds/*/spawn-helper` so
+  the silent failure stops happening after every install.
+- **PATH inheritance for the embedded PTY.** Nova's subprocess
+  PATH is trimmed and typically excludes `~/.local/bin` (where
+  Claude Code installs `claude`). `cli-session.mjs` now extends
+  PATH with `~/.local/bin`, `/usr/local/bin`, and
+  `/opt/homebrew/bin` before spawning so a plain `"claude"` binary
+  reference resolves.
+- **Sibling `/cli` WebSocket was returning HTTP 400.** When two
+  `WebSocketServer({ server, path })` instances share the same
+  HTTP server, the first one's upgrade listener takes every
+  upgrade and rejects anything that doesn't match its path. Both
+  WSSes now use `noServer: true` with a manual `httpServer.on
+  ("upgrade", …)` router that dispatches by URL path.
+
+### Packaging
+- `node-pty@^1.1.0` added to `Scripts/package.json` dependencies.
+  Prebuilds for darwin-arm64 and darwin-x64 bring ~62 MB of native
+  binaries — acceptable because the extension is macOS-only via
+  Nova.
+
 ## 0.12.1 — 2026-05-28
 
 ### Added
