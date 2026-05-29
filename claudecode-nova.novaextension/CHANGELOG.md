@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.14.0 — 2026-05-29
+
+### Added
+- **Resume any past session from the Nova sidebar.** Clicking a row
+  in the "Recent Sessions" panel now opens an action panel with
+  four destinations:
+  - **Chat (web)** — broadcasts a `resume_external` event to every
+    open chat WS client; the chat UI replays the transcript and
+    continues with `--resume <session_id>` on the next message.
+  - **CLI panel** — tells the embedded terminal client to close
+    its WebSocket and reconnect to `/cli?session=<id>`, which makes
+    `cli-session.mjs` prepend `--resume <id>` to the spawn args.
+  - **Terminal** — launches iTerm / Terminal.app via osascript
+    with `claude --resume <id>` already typed in.
+  - **Copy command** — the original v0.7.0 behaviour, preserved.
+- **In-chat "Resume…" button** next to Send. Opens a menu listing
+  the workspace's `~/.claude/projects/<encoded-cwd>/*.jsonl`
+  sessions (top 30, mtime desc) with preview, full UUID, relative
+  time, and git branch.
+- **Full transcript replay** when a session is resumed. A new
+  `list-sessions.mjs` module streams the entire .jsonl back to the
+  chat UI as `history_message` / `history_tool_use` /
+  `history_tool_result` events. Replayed bubbles and tool cards
+  render with `.msg--history` / `.tool--history` dimmed styling so
+  the user can tell the existing turns from the live ones; markers
+  `↻ Loading session …` / `— end of replay · continue below —`
+  frame the replay.
+- **Pending-delivery stash.** If the user clicks the sidebar action
+  before any chat / CLI client is alive, both session modules
+  remember the sessionId and replay it to the first new client
+  that connects. Cleared once delivered (single-shot).
+- **Composer status mirror.** A second dot + text indicator in the
+  composer meta bar mirrors the topbar status (`Ready` / `Thinking…`
+  / `Using <tool>…` / `Writing response…`) so the user sees
+  Claude's activity next to the input field, not just up in the
+  topbar.
+
+### Documentation
+- **README screenshot** illustrating the chat + embedded terminal
+  integration (`docs/screenshot.png` for GitHub,
+  `Images/screenshot.png` for the Panic Library bundle).
+- **New "Modes — Chat (web) and CLI panel" section** in both
+  READMEs covering everything that landed since v0.6: SDK vs CLI
+  fallback auto-detection, slash commands, auto-context toggle,
+  live model picker, streaming Reasoning block, "Resume…" session
+  picker with history replay, the three-way Chat/CLI/Both layout
+  toggle with draggable splitter, and the three places the chat
+  window can be opened.
+
+### Backend wire format
+New WS message types added to chat-session.mjs and ws-server.js:
+`list_sessions`, `sessions`, `resume_session`, `session_resumed`,
+`resume_external`, `history_begin`, `history_message`,
+`history_tool_use`, `history_tool_result`, `history_end`. ws-server
+also receives `resume_in_chat` / `resume_in_cli` over its stdin
+channel from main.js and forwards them to the relevant session
+module's `pushResumeRequest()`.
+
 ## 0.13.2 — 2026-05-29
 
 ### Changed
