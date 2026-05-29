@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.13.1 — 2026-05-29
+
+### Fixed
+- **Nova Extension Library packaging failed with "The response
+  content type was not 'application/json'".** node-pty v1.1.0
+  ships prebuilts for every supported platform; Nova is macOS-only,
+  so the win32-arm64 (28 MB) and win32-x64 (30 MB) bundles were
+  ~58 MB of dead weight bloating the `.novaextension` archive. Past
+  a certain size the Library's packaging step returns an HTML
+  error page instead of JSON. The `postinstall` script now strips
+  those (and any `linux-*` future prebuilts) after every install,
+  bringing the bundle from 308 MB down to 250 MB.
+- **Bash-wrapped `postinstall`** so zsh's `failglob` doesn't abort
+  the cleanup chain when one of the wildcard targets is missing.
+- **New `.npmrc` with `bin-links=false`** so npm stops re-creating
+  the `node_modules/.bin/` symlinks after each install. The
+  previous `rm -rf .bin` race in postinstall lost to npm most of
+  the time, leaving the symlinks Nova's validator chokes on.
+
 ## 0.13.0 — 2026-05-29
 
 ### Added
