@@ -3,10 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
   <title>Claude Code · Nova chat (M2 demo)</title>
   <link rel="stylesheet" href="chat.css" />
-  <!-- highlight.js for code blocks (atom-one-dark theme) -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/styles/atom-one-dark.min.css" />
+  <!-- highlight.js — auto-pick atom-one-dark vs atom-one-light depending
+       on the macOS / Nova Preview color scheme. Both stylesheets load
+       but only the matching media query applies. -->
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/styles/atom-one-dark.min.css"
+        media="(prefers-color-scheme: dark)" />
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/styles/atom-one-light.min.css"
+        media="(prefers-color-scheme: light)" />
   <script defer src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
   <!-- marked for markdown rendering -->
   <script defer src="https://cdn.jsdelivr.net/npm/marked@13.0.3/marked.min.js"></script>

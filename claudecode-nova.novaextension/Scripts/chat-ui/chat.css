@@ -660,3 +660,60 @@ body {
   0%, 80%, 100% { opacity: 0.3; transform: scale(0.85); }
   40%           { opacity: 1;   transform: scale(1); }
 }
+
+/* ── light theme (prefers-color-scheme: light) ──────────────────── */
+/* Nova's Preview tab is WebKit-backed and honours the macOS appearance
+   setting. The chat follows automatically when macOS (and thus Nova
+   when set to "automatic") flips to light mode. */
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:           #ffffff;
+    --bg-elevated:  #f5f5f7;
+    --bg-input:     #f7f7f9;
+    --border:       #d8d8dc;
+    --text:         #1d1d1f;
+    --text-muted:   #6a6a72;
+    --accent:       #2b5bd8;
+    --accent-warm:  #b56a08;
+    --user-bg:      #e3ecff;
+    --assistant-bg: #fafafa;
+    --tool-bg:      #fff7ed;
+    --tool-border:  #e8c890;
+    --error:        #c41818;
+    --success:      #1f8d3c;
+    --code-bg:      #f3f3f6;
+  }
+
+  /* Patches for colors hardcoded outside :root */
+  .dot--idle               { background: #b0b0b8 !important; }
+  ::-webkit-scrollbar-thumb        { background: #cccdd2 !important; }
+  ::-webkit-scrollbar-thumb:hover  { background: #a8a9b0 !important; }
+
+  .slash-menu                      { background: #ffffff; border-color: #d8d8dc; box-shadow: 0 6px 18px rgba(0,0,0,0.12); }
+  .slash-menu__item:hover,
+  .slash-menu__item.active         { background: #f0f0f3; }
+  .slash-menu__label               { color: #2b5bd8; }
+
+  #model-picker                    { background: #ffffff; color: #1d1d1f; border-color: #d8d8dc; }
+  #model-picker:hover              { border-color: #b8b8bf; }
+
+  .btn--primary                    { color: #ffffff; }
+  .btn--primary:hover              { background: #4a72e0; }
+
+  .error-msg                       { background: rgba(196, 24, 24, 0.06); border-color: rgba(196, 24, 24, 0.3); }
+
+  .tool--running .tool__spinner    { border-color: rgba(0, 0, 0, 0.1); border-top-color: var(--accent-warm); }
+
+  .meta-mode--cli                  { background: rgba(31, 141, 60, 0.12); color: #1f8d3c; border-color: rgba(31, 141, 60, 0.35); }
+  .meta-mode--sdk                  { background: rgba(43, 91, 216, 0.12); color: #2b5bd8; border-color: rgba(43, 91, 216, 0.35); }
+
+  .thinking                        { background: rgba(181, 106, 8, 0.04); border-color: #e8c890; }
+  .thinking__header                { color: #8a5a0a; }
+  .thinking__header:hover          { background: rgba(181, 106, 8, 0.07); }
+  .thinking__spinner               { border-color: rgba(138, 90, 10, 0.2); border-top-color: #8a5a0a; }
+  .thinking.done .thinking__spinner{ background: #8a5a0a; }
+  .thinking__body                  { color: #7a5d3c; border-top-color: rgba(138, 90, 10, 0.15); }
+
+  .pending                         { background: rgba(43, 91, 216, 0.06); border-color: rgba(43, 91, 216, 0.25); color: #2b5bd8; }
+}
