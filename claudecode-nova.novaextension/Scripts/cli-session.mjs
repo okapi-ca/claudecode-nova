@@ -32,6 +32,15 @@ export function attach({ httpServer, claudeCommand = "claude", claudeArgs = "", 
     return pty;
   }
 
+  // Track open terminal clients so we can broadcast resume requests
+  // from the Nova sidebar. Each entry is the WS socket.
+  const cliClients = new Set();
+
+  // If the user picks "CLI panel" from the Nova sidebar before any
+  // terminal client is connected, stash the sessionId here so the
+  // next client (or refresh) picks it up.
+  let pendingResumeForNextClient = null;
+
   // noServer + manual upgrade routing — required to coexist with the
   // chat-session WSS on /ws on the same httpServer. See the comment
   // in chat-session.mjs for the rationale.
@@ -45,6 +54,31 @@ export function attach({ httpServer, claudeCommand = "claude", claudeArgs = "", 
 
   wss.on("connection", async (socket, req) => {
     log("info", `cli: ws client connected from ${req.socket.remoteAddress}`);
+    cliClients.add(socket);
+
+    // Optional ?session=<id> query string — when present, spawn
+    // `claude --resume <id>` so the terminal lands inside that past
+    // session. The frontend reconnects with this param after the
+    // user picks "CLI panel" in the Nova sidebar action panel.
+    let resumeSessionId = null;
+    try {
+      const u = new URL(req.url || "/", "http://127.0.0.1");
+      const sid = u.searchParams.get("session");
+      if (sid && /^[a-zA-Z0-9-]+$/.test(sid)) resumeSessionId = sid;
+    } catch (_) {}
+
+    // If the sidebar fired a resume_external before any CLI client
+    // was alive, replay it now — telling the freshly-connected
+    // terminal client to reconnect with ?session=<id>. We send the
+    // signal rather than mutating the just-spawned PTY so the same
+    // close+reopen flow handles both fresh clicks and pending ones.
+    if (!resumeSessionId && pendingResumeForNextClient) {
+      const pending = pendingResumeForNextClient;
+      pendingResumeForNextClient = null;
+      try {
+        socket.send(JSON.stringify({ type: "resume_external", sessionId: pending }));
+      } catch (_) {}
+    }
 
     const ptyMod = await ensurePty();
     if (!ptyMod) {
@@ -59,6 +93,10 @@ export function attach({ httpServer, claudeCommand = "claude", claudeArgs = "", 
     // enough for "--continue --model claude-opus-4-8". Users who need
     // quoted args can adjust the setting; we don't ship a shell here.
     const args = (claudeArgs || "").trim().split(/\s+/).filter(Boolean);
+    if (resumeSessionId) {
+      args.unshift("--resume", resumeSessionId);
+      log("info", `cli: resuming session ${resumeSessionId}`);
+    }
 
     // Nova's subprocess inherits a stripped PATH that typically excludes
     // ~/.local/bin (where `claude` lives) and other user shell dirs. We
@@ -118,6 +156,7 @@ export function attach({ httpServer, claudeCommand = "claude", claudeArgs = "", 
 
     socket.on("close", () => {
       log("info", "cli: ws client disconnected, killing pty");
+      cliClients.delete(socket);
       try { child.kill(); } catch (_) {}
     });
 
@@ -125,6 +164,20 @@ export function attach({ httpServer, claudeCommand = "claude", claudeArgs = "", 
   });
 
   return {
+    // Tell every live terminal client to reconnect with ?session=<id>
+    // so the next PTY spawn includes --resume. The frontend handles
+    // the actual close+reopen of the WebSocket. If nobody is connected
+    // yet, stash for the next client.
+    pushResumeRequest(sessionId) {
+      const payload = JSON.stringify({ type: "resume_external", sessionId });
+      let delivered = 0;
+      for (const sock of cliClients) {
+        if (sock.readyState === sock.OPEN) {
+          try { sock.send(payload); delivered++; } catch (_) {}
+        }
+      }
+      if (delivered === 0) pendingResumeForNextClient = sessionId;
+    },
     stop: () => new Promise((resolve) => wss.close(() => resolve())),
   };
 }

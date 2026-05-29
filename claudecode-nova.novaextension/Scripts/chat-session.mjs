@@ -23,6 +23,7 @@ import { fileURLToPath } from "url";
 import { WebSocketServer } from "ws";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { buildNovaToolsServer } from "./chat-tool-wrappers.mjs";
+import { listSessions, streamSessionTranscript } from "./list-sessions.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CHAT_UI_DIR = join(__dirname, "chat-ui");
@@ -293,6 +294,13 @@ export async function init(opts) {
   // WebSocket. Added on `connection`, removed on `close`.
   const chatClients = new Set();
 
+  // The last resume request received from the Nova sidebar that
+  // hasn't been picked up by any client yet. If the user clicks
+  // "Chat (web)" while no chat tab is open, the broadcast goes
+  // nowhere; we stash the sessionId here and replay it to the next
+  // client that connects. Cleared once delivered.
+  let pendingResumeForNextClient = null;
+
   // ── WebSocket server ──────────────────────────────────────────
   // noServer + manual upgrade routing so a sibling WSS (cli-session
   // on /cli) can coexist on the same HTTP server. Otherwise the first
@@ -335,6 +343,13 @@ export async function init(opts) {
     const initialBridge = getBridgeInfo ? getBridgeInfo() : null;
     if (initialBridge) send({ type: "bridge_status", ...initialBridge });
 
+    // If a "Chat (web)" sidebar click landed before this client was
+    // alive, replay it now so the resume request isn't lost.
+    if (pendingResumeForNextClient) {
+      send({ type: "resume_external", sessionId: pendingResumeForNextClient });
+      pendingResumeForNextClient = null;
+    }
+
     socket.on("message", async (raw) => {
       let msg;
       try { msg = JSON.parse(raw.toString("utf8")); }
@@ -353,6 +368,56 @@ export async function init(opts) {
           log("info", `chat: switching model ${model} → ${msg.model}`);
           model = msg.model;
         }
+        return;
+      }
+
+      if (msg.type === "list_sessions") {
+        // Reply with sessions from ~/.claude/projects/<cwd>/. Only
+        // makes practical sense in CLI mode (the SDK uses its own
+        // session store), but returning the list anyway lets the
+        // user see what's available either way.
+        try {
+          const cwd = process.env.CC_WORKSPACE || process.cwd();
+          const sessions = await listSessions(cwd, { limit: 30 });
+          send({ type: "sessions", sessions });
+        } catch (err) {
+          log("warn", `chat: listSessions failed: ${err.message}`);
+          send({ type: "sessions", sessions: [] });
+        }
+        return;
+      }
+
+      if (msg.type === "resume_session" && typeof msg.sessionId === "string") {
+        // Mark this session as the one to attach to on the next
+        // user_message. The CLI driver passes --resume <id>; the SDK
+        // path's `resume:` option uses the same variable. Note that
+        // SDK and CLI session stores are NOT interchangeable — the
+        // user is responsible for picking a session that matches the
+        // currently active chatMode.
+        currentSessionId = msg.sessionId;
+        log("info", `chat: resuming session ${msg.sessionId}`);
+
+        // Replay the user/assistant turns of the chosen session so
+        // the user has visual continuity before sending the next
+        // prompt. Tool calls are skipped for now (they'd add a lot of
+        // noise on replay; can be surfaced later behind a toggle).
+        send({ type: "history_begin", sessionId: msg.sessionId });
+        try {
+          const cwd = process.env.CC_WORKSPACE || process.cwd();
+          await streamSessionTranscript(cwd, msg.sessionId, (evt) => {
+            if (evt.kind === "message") {
+              send({ type: "history_message", role: evt.role, text: evt.text, ts: evt.ts });
+            } else if (evt.kind === "tool_use") {
+              send({ type: "history_tool_use", name: evt.name, input: evt.input, ts: evt.ts });
+            } else if (evt.kind === "tool_result") {
+              send({ type: "history_tool_result", name: evt.name, text: evt.text, isError: evt.isError, ts: evt.ts });
+            }
+          });
+        } catch (err) {
+          log("warn", `chat: streamSessionTranscript failed: ${err.message}`);
+        }
+        send({ type: "history_end" });
+        send({ type: "session_resumed", sessionId: msg.sessionId });
         return;
       }
 
@@ -497,6 +562,23 @@ export async function init(opts) {
           try { sock.send(payload); } catch (_) {}
         }
       }
+    },
+    // Triggered when the user clicks a session in the Nova sidebar
+    // and picks "Chat (web)" from the action panel. Tells every open
+    // chat client to resume that session (same effect as picking it
+    // from the in-chat Resume… menu). If no chat client is open yet,
+    // stash the sessionId so the next one to connect picks it up.
+    pushResumeRequest(sessionId) {
+      const payload = JSON.stringify({ type: "resume_external", sessionId });
+      let delivered = 0;
+      for (const sock of chatClients) {
+        if (sock.readyState === sock.OPEN) {
+          try { sock.send(payload); delivered++; } catch (_) {}
+        }
+      }
+      // No live client → remember for next connect (e.g. user hits
+      // refresh after clicking the sidebar action).
+      if (delivered === 0) pendingResumeForNextClient = sessionId;
     },
     stop: () =>
       new Promise((resolve) => {

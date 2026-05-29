@@ -966,3 +966,115 @@ body {
 
 .statusbar__spacer { flex: 1; }
 .statusbar__item--right { justify-content: flex-end; }
+
+/* ── resume-session menu (similar shape to slash menu) ──────────── */
+
+.resume-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: #25252b;
+  border: 1px solid #3a3a42;
+  border-radius: var(--radius, 6px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 10;
+}
+
+.resume-menu__empty {
+  padding: 10px 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.resume-menu__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 14px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid #2e2e34;
+  color: var(--fg, var(--text));
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.resume-menu__item:first-child { border-top: 0; }
+.resume-menu__item:hover       { background: #32323a; }
+
+.resume-menu__preview { font-size: 12.5px; }
+.resume-menu__meta {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.resume-note {
+  align-self: center;
+  padding: 4px 10px;
+  background: rgba(124, 158, 255, 0.1);
+  border: 1px dashed rgba(124, 158, 255, 0.4);
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+}
+
+/* Light-mode overrides */
+[data-theme="light"] .resume-menu               { background: #ffffff; border-color: #d8d8dc; box-shadow: 0 6px 18px rgba(0,0,0,0.12); }
+[data-theme="light"] .resume-menu__item         { border-top-color: #ececef; }
+[data-theme="light"] .resume-menu__item:hover   { background: #f0f0f3; }
+[data-theme="light"] .resume-note               { background: rgba(43, 91, 216, 0.08); border-color: rgba(43, 91, 216, 0.35); }
+
+/* ── replayed history messages + markers ────────────────────────── */
+
+.msg--history .msg__body { opacity: 0.72; }
+.msg--history .msg__role { opacity: 0.7; font-style: italic; }
+
+.history-marker {
+  align-self: stretch;
+  text-align: center;
+  padding: 6px 12px;
+  margin: 4px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  letter-spacing: 0.04em;
+}
+
+.history-marker--end {
+  border-top: 0;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+/* Make the meta row two-line so the full session UUID stays readable
+   alongside the relative time + branch. */
+.resume-menu__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.resume-menu__sid {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  word-break: break-all;
+}
+
+/* Tool cards from a replayed session — same shape, dimmed. */
+.tool--history { opacity: 0.72; }
+.tool--history .tool__name { font-style: italic; }
+
+/* Mirror of the topbar status indicator, placed inside the composer
+   meta bar so the user sees Claude's current activity right next to
+   the input — useful when the topbar scrolls out of view or is
+   compressed. Inherits .composer__status from earlier. */
+#composer-status .dot { width: 6px; height: 6px; }

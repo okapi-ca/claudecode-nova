@@ -413,6 +413,16 @@ function openChatInNovaPreview(url) {
     }
   }
 
+  // If the wrapper is already open anywhere in Nova, the user
+  // probably also has the WebKit Preview tab visible — calling
+  // openFile() again would switch focus to the source-HTML tab and
+  // hide the Preview the user actually cares about. Bail out silently
+  // and let the WS broadcast reach the live chat client.
+  const existing = (nova.workspace.textEditors || []).find(
+    (ed) => ed.document && ed.document.path === wrapperPath
+  );
+  if (existing) return;
+
   nova.workspace.openFile(wrapperPath).then(function() {
     showNotification(
       "Chat wrapper opened",
@@ -1955,6 +1965,11 @@ function sessionsRefreshHandler() {
 // it to the clipboard. We don't launch a terminal here — Nova has no
 // programmatic terminal API, so the user pastes into whatever shell they're
 // already using (Project Terminal, iTerm, etc.).
+// Clicking a Recent Sessions row pops an action panel asking WHERE to
+// resume — the chat web UI, the embedded CLI panel, an external
+// terminal, or just copy the command. Picking "Chat web" or "CLI
+// panel" also opens / refreshes the chat window so the user lands
+// straight on the right surface.
 function resumeSessionHandler() {
   if (!sessionsTree) return;
   var sel = sessionsTree.selection;
@@ -1962,13 +1977,109 @@ function resumeSessionHandler() {
   var element = sel[0];
   if (!element || !element.sessionId) return;
 
+  var sessionId = element.sessionId;
   var claudeCmd = nova.workspace.config.get("claudecode.claudeCommand") || "claude";
-  var resumeCmd = claudeCmd + " --resume " + element.sessionId;
+  var resumeCmd = claudeCmd + " --resume " + sessionId;
+
+  nova.workspace.showActionPanel(
+    "Resume session " + sessionId.slice(0, 8) + "…\n\n" + (element.preview || ""),
+    { buttons: ["Chat (web)", "CLI panel", "Terminal", "Copy command", "Cancel"] },
+    function(idx) {
+      if (idx === 0)      resumeSessionInChat(sessionId);
+      else if (idx === 1) resumeSessionInCliPanel(sessionId);
+      else if (idx === 2) resumeSessionInTerminal(sessionId);
+      else if (idx === 3) {
+        try {
+          nova.clipboard.writeText(resumeCmd);
+          showNotification("Copied", resumeCmd);
+        } catch (err) {
+          showNotification("Copy failed", err.message);
+        }
+      }
+    }
+  );
+}
+
+// Resume in the web chat UI. Sends a resume_external broadcast to
+// every open chat client; whichever surface the user is using
+// (browser tab, Nova Preview, etc.) picks it up. We deliberately
+// don't try to open the wrapper file here — Nova's API can't tell
+// whether the Preview tab is already up, and openFile() would force
+// the source-HTML tab to the front and bury the user's actual
+// Preview view. If no chat is open, the user opens one manually via
+// the "Open Claude Chat in Browser" command.
+function resumeSessionInChat(sessionId) {
+  if (!nova.config.get("claudecode.chat.enabled")) {
+    showNotification("Chat disabled", "Enable Chat UI in extension settings to resume there.");
+    return;
+  }
+  sendToServer({ type: "resume_in_chat", sessionId: sessionId });
+  showNotification(
+    "Resume sent to chat",
+    "If the chat window isn't open, run \"Open Claude Chat in Browser\" first, then click Resume again."
+  );
+}
+
+// Resume inside the embedded xterm.js terminal panel. ws-server
+// reconnects the /cli WS spawning `claude --resume <id>` this time.
+// Same rationale as resumeSessionInChat: we don't reopen the wrapper.
+function resumeSessionInCliPanel(sessionId) {
+  if (!nova.config.get("claudecode.chat.enabled")) {
+    showNotification("Chat disabled", "Enable Chat UI in extension settings to resume in the embedded CLI panel.");
+    return;
+  }
+  sendToServer({ type: "resume_in_cli", sessionId: sessionId });
+  showNotification(
+    "Resume sent to CLI panel",
+    "If the chat window isn't open, run \"Open Claude Chat in Browser\" first, then click Resume again."
+  );
+}
+
+// Resume in an external terminal (iTerm / Terminal.app / etc.).
+// Reuses the existing launchClaude pipeline by temporarily injecting
+// the --resume arg into claudecode.claudeArgs for this one call.
+async function resumeSessionInTerminal(sessionId) {
+  // Build the command line that launchClaude builds, but with the
+  // extra --resume flag prepended. We can't mutate the setting just
+  // for this call, so reimplement the minimal launch here.
+  var claudeCmd = nova.workspace.config.get("claudecode.claudeCommand") || "claude";
+  var extraArgs = (nova.workspace.config.get("claudecode.claudeArgs") || "").trim();
+  var command = claudeCmd + " --resume " + sessionId + (extraArgs ? " " + extraArgs : "");
+  var terminalApp = nova.config.get("claudecode.terminalApp") || "auto";
+
+  // Inline launch via the same osascript-based flow launchClaude uses
+  // for iTerm / Terminal. For "clipboard" or unknown terminals, just
+  // copy and notify.
+  if (terminalApp === "clipboard") {
+    nova.clipboard.writeText(command);
+    showNotification("Copied", command);
+    return;
+  }
+
+  // Delegate to launchClaude by temporarily setting an env var the
+  // helper can read. Simpler: just exec osascript here for the two
+  // supported terminals. iTerm first, then fall back to Terminal.
+  var script;
+  if (terminalApp === "Terminal") {
+    script = 'tell application "Terminal" to do script "' + command.replace(/"/g, '\\"') + '"\n' +
+             'tell application "Terminal" to activate';
+  } else {
+    // iTerm or auto — try iTerm
+    script =
+      'tell application "iTerm" to activate\n' +
+      'tell application "iTerm"\n' +
+      '  if (count of windows) = 0 then create window with default profile\n' +
+      '  tell current window to create tab with default profile\n' +
+      '  tell current session of current window to write text "' + command.replace(/"/g, '\\"') + '"\n' +
+      'end tell';
+  }
   try {
-    nova.clipboard.writeText(resumeCmd);
-    showNotification("Copied", "Resume command copied to clipboard:\n" + resumeCmd);
+    var proc = new Process("/usr/bin/osascript", { args: ["-e", script], stdio: "ignore" });
+    proc.start();
+    showNotification("Resumed in Terminal", "Session " + sessionId.slice(0, 8) + "… opened.");
   } catch (err) {
-    showNotification("Copy failed", err.message);
+    nova.clipboard.writeText(command);
+    showNotification("Copied (osascript failed)", command);
   }
 }
 

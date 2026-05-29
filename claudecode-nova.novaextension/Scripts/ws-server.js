@@ -36,6 +36,7 @@ const CHAT_PORT    = parseInt(process.env.CC_CHAT_PORT || "5180", 10);
 const CHAT_MODEL   = process.env.CC_CHAT_MODEL || "claude-sonnet-4-6";
 const CHAT_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 let chatHandle = null;  // { port, stop() } once chat-session.mjs is initialized
+let cliHandle = null;   // { pushResumeRequest(sessionId), stop() } once cli-session.mjs is attached
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -465,6 +466,22 @@ function callNovaTool(toolName, args) {
 }
 
 function handleNovaMessage(msg) {
+  // Resume requests forwarded from main.js when the user clicks a
+  // Recent Sessions row in the Nova sidebar. Dispatched to the chat
+  // or cli session module which broadcasts to its live ws clients.
+  if (msg.type === "resume_in_chat" && msg.sessionId) {
+    if (chatHandle && typeof chatHandle.pushResumeRequest === "function") {
+      chatHandle.pushResumeRequest(msg.sessionId);
+    }
+    return;
+  }
+  if (msg.type === "resume_in_cli" && msg.sessionId) {
+    if (cliHandle && typeof cliHandle.pushResumeRequest === "function") {
+      cliHandle.pushResumeRequest(msg.sessionId);
+    }
+    return;
+  }
+
   // Tool result from Nova — dispatch by kind to the right resolver
   if (msg.type === "tool_result" && msg.requestId) {
     const pending = pendingRequests[msg.requestId];
@@ -714,7 +731,7 @@ async function startServer() {
         // `claude` in a real PTY via node-pty.
         try {
           const cliModule = await import("./cli-session.mjs");
-          cliModule.attach({
+          cliHandle = cliModule.attach({
             httpServer: chatHandle.httpServer,
             claudeCommand: process.env.CC_CLAUDE_PATH || "claude",
             claudeArgs: process.env.CC_CLAUDE_ARGS || "",

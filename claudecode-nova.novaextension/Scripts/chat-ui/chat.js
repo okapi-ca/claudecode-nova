@@ -300,6 +300,71 @@ function prettyToolName(name) {
   return name.replace(/^mcp__[^_]+__/, "");
 }
 
+// Historical tool cards mirror the live appendToolCard layout but
+// arrive collapsed and dimmed so the replay stays scannable. Match
+// by tool name (FIFO) when the corresponding result event lands.
+const historyToolCards = [];
+
+function appendHistoryToolUse(name, input) {
+  hideEmptyState();
+  const card = document.createElement("div");
+  card.className = "tool tool--history";
+  const summary = Object.keys(input || {}).length ? JSON.stringify(input) : "(no args)";
+  const pretty = prettyToolName(name);
+  card.innerHTML = `
+    <div class="tool__header" role="button">
+      <span class="tool__icon"></span>
+      <span class="tool__name">${escapeHtml(pretty)}</span>
+      <span class="tool__summary">${escapeHtml(summary)}</span>
+      <span class="tool__caret">▶</span>
+    </div>
+    <div class="tool__details">
+      <div class="tool__section-label">Input</div>
+      <pre class="tool__pre">${escapeHtml(JSON.stringify(input || {}, null, 2))}</pre>
+      <div class="tool__section-label tool__result-label" hidden>Result</div>
+      <pre class="tool__pre tool__result" hidden></pre>
+    </div>
+  `;
+  card.querySelector(".tool__header").addEventListener("click", () => card.classList.toggle("expanded"));
+  chatEl.appendChild(card);
+  historyToolCards.push({ name, card });
+  scrollToBottom();
+}
+
+function attachHistoryToolResult(name, text, isError) {
+  const idx = historyToolCards.findIndex((c) => c.name === name);
+  const target = idx >= 0 ? historyToolCards.splice(idx, 1)[0].card : null;
+  if (!target) return;
+  if (isError) target.classList.add("error");
+  const label = target.querySelector(".tool__result-label");
+  const pre   = target.querySelector(".tool__result");
+  if (label) label.hidden = false;
+  if (pre)   { pre.hidden = false; pre.textContent = text; }
+}
+
+// Render a historical (replayed) message — same shape as live bubbles
+// but with a `--history` modifier class for dimmed styling so the
+// user can tell what was already said vs. what's fresh this turn.
+function appendHistoryMessage(role, text) {
+  hideEmptyState();
+  const wrap = document.createElement("div");
+  const isUser = role === "user";
+  wrap.className = "msg msg--" + (isUser ? "user" : "assistant") + " msg--history";
+  wrap.innerHTML = `
+    <div class="msg__role">${isUser ? "You" : "Claude"}</div>
+    <div class="msg__body"></div>
+  `;
+  const body = wrap.querySelector(".msg__body");
+  if (isUser) {
+    body.textContent = text; // user messages are plain text
+  } else {
+    body.innerHTML = renderMarkdown(text);
+    highlightCodeBlocks(body);
+  }
+  chatEl.appendChild(wrap);
+  scrollToBottom();
+}
+
 function appendErrorMessage(text) {
   const el = document.createElement("div");
   el.className = "error-msg";
@@ -342,6 +407,60 @@ function connect() {
 
 function handleServerMessage(msg) {
   switch (msg.type) {
+    case "sessions":
+      showResumeMenu(msg.sessions || []);
+      break;
+
+    case "resume_external":
+      // The Nova sidebar's action panel told us to resume this
+      // session. Reuse the same in-chat resume flow (which triggers
+      // history replay + sets currentSessionId server-side).
+      if (msg.sessionId) pickResumeSession(msg.sessionId, "");
+      // Bring this panel to the visible layout if the user was in
+      // CLI-only mode — otherwise the resume is invisible to them.
+      if (panelsEl && chatPanel.hidden) setLayout("chat");
+      break;
+
+    case "history_begin":
+      // Wipe the empty-state and any leftover content so the replay
+      // starts from a clean transcript.
+      hideEmptyState();
+      // Note in the transcript that we're about to load past turns.
+      {
+        const hdr = document.createElement("div");
+        hdr.className = "history-marker";
+        hdr.textContent = `↻ Loading session ${(msg.sessionId || "").slice(0, 8)}… (history below)`;
+        chatEl.appendChild(hdr);
+      }
+      break;
+
+    case "history_message":
+      appendHistoryMessage(msg.role, msg.text);
+      break;
+
+    case "history_tool_use":
+      appendHistoryToolUse(msg.name, msg.input || {});
+      break;
+
+    case "history_tool_result":
+      attachHistoryToolResult(msg.name, msg.text || "", msg.isError);
+      break;
+
+    case "history_end":
+      {
+        const mk = document.createElement("div");
+        mk.className = "history-marker history-marker--end";
+        mk.textContent = "— end of replay · continue below —";
+        chatEl.appendChild(mk);
+        scrollToBottom();
+      }
+      break;
+
+    case "session_resumed":
+      // Backend confirmed the resume; nothing to render — the next
+      // user_message will carry --resume / resume:.
+      break;
+
     case "bridge_status": {
       const dot = document.getElementById("bridge-dot");
       const txt = document.getElementById("bridge-text");
@@ -444,6 +563,13 @@ function handleServerMessage(msg) {
 function setStatus(kind, text) {
   statusDot.className = "dot dot--" + kind;
   statusText.textContent = text;
+  // Mirror to the composer-side status indicator so the user sees
+  // Claude's current activity near the input field, not just in the
+  // far-away topbar.
+  const cd = document.getElementById("composer-status-dot");
+  const ct = document.getElementById("composer-status-text");
+  if (cd) cd.className = "dot dot--" + kind;
+  if (ct) ct.textContent = text;
 }
 
 // ── send flow ─────────────────────────────────────────────────────
@@ -651,15 +777,31 @@ function ensureTerminal() {
   return termInstance;
 }
 
-function connectTerminalWs() {
+function connectTerminalWs(sessionIdToResume) {
   if (termWs) return;
-  const url = `ws://${location.host}/cli`;
+  // Reconnecting with ?session=<id> tells cli-session to spawn the
+  // PTY with --resume <id>. Used by the Nova sidebar "CLI panel"
+  // action.
+  const qs = sessionIdToResume ? `?session=${encodeURIComponent(sessionIdToResume)}` : "";
+  const url = `ws://${location.host}/cli${qs}`;
   termWs = new WebSocket(url);
   termWs.addEventListener("message", (e) => {
     let msg;
     try { msg = JSON.parse(e.data); } catch { return; }
     if (msg.type === "output" && termInstance) termInstance.write(msg.data);
     if (msg.type === "exit" && termInstance) termInstance.write(`\r\n\x1b[33m[claude exited code=${msg.code}]\x1b[0m\r\n`);
+    if (msg.type === "resume_external" && msg.sessionId) {
+      // Bring the CLI panel to view, then reconnect so the new PTY
+      // launches with --resume <id>.
+      if (panelsEl && termPanel.hidden) setLayout("cli");
+      if (termInstance) {
+        termInstance.write(`\r\n\x1b[36m[resuming session ${msg.sessionId.slice(0, 8)}…]\x1b[0m\r\n`);
+        termInstance.clear();
+      }
+      try { termWs && termWs.close(); } catch (_) {}
+      termWs = null;
+      connectTerminalWs(msg.sessionId);
+    }
   });
   termWs.addEventListener("close", () => {
     termWs = null;
@@ -781,6 +923,83 @@ if (modelPicker) {
     renderChatStatus();
   });
 }
+
+// ── resume previous session ────────────────────────────────────────
+
+const resumeBtn  = document.getElementById("resume");
+const resumeMenu = document.getElementById("resume-menu");
+
+function showResumeMenu(sessions) {
+  if (!resumeMenu) return;
+  if (!sessions || sessions.length === 0) {
+    resumeMenu.innerHTML = `<div class="resume-menu__empty">No previous sessions for this workspace.</div>`;
+  } else {
+    resumeMenu.innerHTML = sessions.map((s) => `
+      <button class="resume-menu__item" data-sid="${s.sessionId}" title="${escapeHtml(s.sessionId)}">
+        <span class="resume-menu__preview">${escapeHtml(s.preview || "(empty session)")}</span>
+        <span class="resume-menu__meta">
+          <span class="resume-menu__sid">${escapeHtml(s.sessionId)}</span>
+          <span>${relativeTimeShort(s.mtimeMs)}${s.gitBranch ? " · " + escapeHtml(s.gitBranch) : ""}</span>
+        </span>
+      </button>
+    `).join("");
+    resumeMenu.querySelectorAll(".resume-menu__item").forEach((el) => {
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        pickResumeSession(el.dataset.sid, el.querySelector(".resume-menu__preview")?.textContent || "");
+      });
+    });
+  }
+  resumeMenu.hidden = false;
+}
+
+function hideResumeMenu() {
+  if (resumeMenu) resumeMenu.hidden = true;
+}
+
+function pickResumeSession(sessionId, preview) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: "resume_session", sessionId }));
+  hideResumeMenu();
+  // Visual hint in the transcript so the user remembers the chat is
+  // now picking up from a previous session.
+  const note = document.createElement("div");
+  note.className = "resume-note";
+  note.textContent = `↻ Resuming session ${sessionId.slice(0, 8)}…${preview ? " — " + preview : ""}`;
+  chatEl.appendChild(note);
+  hideEmptyState();
+  scrollToBottom();
+}
+
+function relativeTimeShort(ts) {
+  const diff = (Date.now() - ts) / 1000;
+  if (diff < 60)        return Math.floor(diff) + "s ago";
+  if (diff < 3600)      return Math.floor(diff / 60) + "m ago";
+  if (diff < 86400)     return Math.floor(diff / 3600) + "h ago";
+  if (diff < 86400*30)  return Math.floor(diff / 86400) + "d ago";
+  return new Date(ts).toLocaleDateString();
+}
+
+if (resumeBtn) {
+  resumeBtn.addEventListener("click", () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (resumeMenu && !resumeMenu.hidden) { hideResumeMenu(); return; }
+    ws.send(JSON.stringify({ type: "list_sessions" }));
+    // The "sessions" reply will trigger showResumeMenu(). Show a
+    // momentary loading state.
+    if (resumeMenu) {
+      resumeMenu.innerHTML = `<div class="resume-menu__empty">Loading sessions…</div>`;
+      resumeMenu.hidden = false;
+    }
+  });
+}
+
+// Close the resume menu when clicking outside.
+document.addEventListener("mousedown", (e) => {
+  if (resumeMenu && !resumeMenu.hidden && !resumeMenu.contains(e.target) && e.target !== resumeBtn) {
+    hideResumeMenu();
+  }
+});
 
 // The CLI's init event sometimes returns the model with a "[1m]" suffix
 // (e.g. "claude-opus-4-8[1m]"). The picker stores the plain ID — strip
