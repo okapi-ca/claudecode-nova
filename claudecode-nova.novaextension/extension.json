@@ -283,6 +283,18 @@
       "description": "Plain-text API key — used only if both the Keychain AND 1Password reference are empty. Stored in Nova settings (not encrypted at rest). Prefer the Keychain via 'Set Claude Chat API Key' command."
     },
     {
+      "key": "claudecode.chat.theme",
+      "title": "Chat UI theme",
+      "type": "enum",
+      "values": [
+        ["auto", "Auto (follow macOS appearance)"],
+        ["dark", "Dark (always)"],
+        ["light", "Light (always)"]
+      ],
+      "default": "auto",
+      "description": "Nova does not expose its current theme to extensions. If your Nova is locked to a dark theme but macOS is in light mode (or vice-versa), set this to match your Nova theme. \"Auto\" follows the macOS appearance via prefers-color-scheme."
+    },
+    {
       "key": "claudecode.chat.model",
       "title": "Chat model",
       "type": "enum",

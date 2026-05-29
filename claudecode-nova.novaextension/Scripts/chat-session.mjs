@@ -48,7 +48,7 @@ const MIME = {
  * @param {Function} opts.log            (level, msg, data?) → void
  */
 export async function init(opts) {
-  const { port, apiKey, model: initialModel = "claude-sonnet-4-6", callNovaTool, log, claudePath } = opts;
+  const { port, apiKey, model: initialModel = "claude-sonnet-4-6", callNovaTool, log, claudePath, getBridgeInfo } = opts;
 
   // The currently-active model. Starts from the value `init()` was called
   // with (read by main.js from claudecode.chat.model), can be flipped at
@@ -288,11 +288,29 @@ export async function init(opts) {
     }
   });
 
+  // Track every open chat client so we can broadcast bridge-status
+  // updates when MCP clients connect/disconnect on the parallel
+  // WebSocket. Added on `connection`, removed on `close`.
+  const chatClients = new Set();
+
   // ── WebSocket server ──────────────────────────────────────────
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+  // noServer + manual upgrade routing so a sibling WSS (cli-session
+  // on /cli) can coexist on the same HTTP server. Otherwise the first
+  // WSS attached via {server} captures every upgrade and rejects
+  // everything that doesn't match its path filter, leaving /cli with
+  // HTTP 400.
+  const wss = new WebSocketServer({ noServer: true });
+  httpServer.on("upgrade", (req, socket, head) => {
+    const path = (req.url || "").split("?")[0];
+    if (path === "/ws") {
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+    }
+    // Other paths (e.g. /cli) are handled by other upgrade listeners.
+  });
 
   wss.on("connection", (socket, req) => {
     log("info", `chat: ws client connected from ${req.socket.remoteAddress}`);
+    chatClients.add(socket);
 
     let currentAbortController = null;
     let currentSessionId = null;
@@ -302,11 +320,20 @@ export async function init(opts) {
     };
 
     // Push the current config to the client immediately so the model
-    // picker and mode badge reflect reality before the first session
-    // event. Without this the picker shows its first <option> (Sonnet)
-    // until the user sends a message, even if a different model is
-    // configured in extension settings.
-    send({ type: "config", defaultModel: model, mode: chatMode });
+    // picker, mode badge, and theme override reflect reality before the
+    // first session event.
+    send({
+      type: "config",
+      defaultModel: model,
+      mode: chatMode,
+      theme: process.env.CC_CHAT_THEME || "auto",
+    });
+
+    // Initial bridge status — port + connected client count read straight
+    // from ws-server. Pushed again whenever clients connect/disconnect
+    // (see broadcastBridgeStatus in ws-server.js).
+    const initialBridge = getBridgeInfo ? getBridgeInfo() : null;
+    if (initialBridge) send({ type: "bridge_status", ...initialBridge });
 
     socket.on("message", async (raw) => {
       let msg;
@@ -442,6 +469,7 @@ export async function init(opts) {
 
     socket.on("close", () => {
       if (currentAbortController) currentAbortController.abort();
+      chatClients.delete(socket);
       log("info", "chat: ws client disconnected");
     });
 
@@ -459,6 +487,17 @@ export async function init(opts) {
 
   return {
     port,
+    httpServer, // exposed so cli-session can attach a sibling /cli WSS
+    // Broadcaster called by ws-server.js when MCP clients connect or
+    // disconnect, so the chat UI's statusbar reflects live state.
+    pushBridgeStatus(info) {
+      const payload = JSON.stringify({ type: "bridge_status", ...info });
+      for (const sock of chatClients) {
+        if (sock.readyState === sock.OPEN) {
+          try { sock.send(payload); } catch (_) {}
+        }
+      }
+    },
     stop: () =>
       new Promise((resolve) => {
         wss.close(() => httpServer.close(() => resolve()));

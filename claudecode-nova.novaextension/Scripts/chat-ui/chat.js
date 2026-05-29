@@ -342,14 +342,38 @@ function connect() {
 
 function handleServerMessage(msg) {
   switch (msg.type) {
+    case "bridge_status": {
+      const dot = document.getElementById("bridge-dot");
+      const txt = document.getElementById("bridge-text");
+      if (dot && txt) {
+        const n = msg.clientCount || 0;
+        if (msg.port) {
+          // The bridge is up the moment it has a port — clients are
+          // additional information, not a prerequisite. Green when
+          // listening; idle only when the bridge isn't started yet.
+          txt.textContent = `Bridge: port ${msg.port} · ${n} client${n === 1 ? "" : "s"}`;
+          dot.className = "dot dot--connected";
+        } else {
+          txt.textContent = "Bridge: starting…";
+          dot.className = "dot dot--idle";
+        }
+      }
+      break;
+    }
+
     case "config":
       // Sent once right after the WS connection opens. Pre-populates
-      // the model picker and mode badge so they reflect the backend's
-      // actual default before any session_started event arrives.
+      // the model picker, mode badge, and theme override so they
+      // reflect the backend's actual default before any session_started
+      // event arrives.
       if (msg.defaultModel && modelPicker) {
         modelPicker.value = stripModelSuffix(msg.defaultModel);
       }
       applyModeBadge(msg.mode);
+      applyTheme(msg.theme);
+      if (msg.mode) chatStatus.mode = msg.mode;
+      if (msg.defaultModel) chatStatus.model = stripModelSuffix(msg.defaultModel);
+      renderChatStatus();
       break;
 
     case "session_started":
@@ -361,6 +385,9 @@ function handleServerMessage(msg) {
       if (msg.model && modelPicker) {
         modelPicker.value = stripModelSuffix(msg.model);
       }
+      if (msg.mode) chatStatus.mode = msg.mode;
+      if (msg.model) chatStatus.model = stripModelSuffix(msg.model);
+      renderChatStatus();
       setStatus("thinking", "Thinking…");
       break;
 
@@ -567,10 +594,191 @@ document.querySelectorAll(".suggestion").forEach((btn) => {
   });
 });
 
+// ── embedded terminal (xterm.js → /cli WS → node-pty `claude`) ─────
+
+let termInstance = null;
+let termFitAddon = null;
+let termWs = null;
+
+// Pick the xterm.js theme object matching the current data-theme
+// attribute on <html>. Re-called whenever the page theme changes.
+function currentTerminalTheme() {
+  const t = document.documentElement.getAttribute("data-theme");
+  if (t === "light") {
+    return { background: "#ffffff", foreground: "#1d1d1f", cursor: "#1d1d1f" };
+  }
+  return { background: "#1e1e22", foreground: "#e8e8ea", cursor: "#e8e8ea" };
+}
+
+function ensureTerminal() {
+  if (termInstance) return termInstance;
+  if (typeof Terminal === "undefined") return null; // xterm.js not loaded yet
+  const host = document.getElementById("terminal-host");
+  if (!host) return null;
+
+  termInstance = new Terminal({
+    cursorBlink: true,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontSize: 12,
+    theme: currentTerminalTheme(),
+  });
+  if (typeof FitAddon !== "undefined" && FitAddon.FitAddon) {
+    termFitAddon = new FitAddon.FitAddon();
+    termInstance.loadAddon(termFitAddon);
+  }
+  termInstance.open(host);
+  if (termFitAddon) {
+    try { termFitAddon.fit(); } catch (_) {}
+  }
+  termInstance.onData((data) => {
+    if (termWs && termWs.readyState === WebSocket.OPEN) {
+      termWs.send(JSON.stringify({ type: "input", data }));
+    }
+  });
+  connectTerminalWs();
+  // Resize the PTY whenever the terminal element changes size.
+  window.addEventListener("resize", () => {
+    if (termFitAddon) {
+      try {
+        termFitAddon.fit();
+        const cols = termInstance.cols, rows = termInstance.rows;
+        if (termWs && termWs.readyState === WebSocket.OPEN) {
+          termWs.send(JSON.stringify({ type: "resize", cols, rows }));
+        }
+      } catch (_) {}
+    }
+  });
+  return termInstance;
+}
+
+function connectTerminalWs() {
+  if (termWs) return;
+  const url = `ws://${location.host}/cli`;
+  termWs = new WebSocket(url);
+  termWs.addEventListener("message", (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg.type === "output" && termInstance) termInstance.write(msg.data);
+    if (msg.type === "exit" && termInstance) termInstance.write(`\r\n\x1b[33m[claude exited code=${msg.code}]\x1b[0m\r\n`);
+  });
+  termWs.addEventListener("close", () => {
+    termWs = null;
+    if (termInstance) termInstance.write("\r\n\x1b[90m[terminal disconnected — switch layout to reconnect]\x1b[0m\r\n");
+  });
+  termWs.addEventListener("error", () => {
+    if (termInstance) termInstance.write("\r\n\x1b[31m[terminal ws error]\x1b[0m\r\n");
+  });
+}
+
+// Layout toggle — Chat only / Both / CLI only
+const panelsEl   = document.getElementById("panels");
+const termPanel  = document.getElementById("terminal-panel");
+const chatPanel  = document.getElementById("chat-panel"); // wraps chat history + composer
+const splitterEl = document.getElementById("splitter");
+
+// Draggable splitter — only active in Both mode. Adjusts the flex
+// basis of the two panels live as the user drags the divider.
+if (splitterEl) {
+  let dragging = false;
+  let startY = 0;
+  let startTermPct = 50; // % of panels height occupied by terminal at drag start
+
+  splitterEl.addEventListener("mousedown", (e) => {
+    dragging = true;
+    splitterEl.classList.add("dragging");
+    startY = e.clientY;
+    const totalH = panelsEl.getBoundingClientRect().height;
+    const termH  = termPanel.getBoundingClientRect().height;
+    startTermPct = totalH > 0 ? (termH / totalH) * 100 : 50;
+    // Block text selection while dragging
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const totalH = panelsEl.getBoundingClientRect().height;
+    if (totalH <= 0) return;
+    const deltaPct = ((e.clientY - startY) / totalH) * 100;
+    let pct = startTermPct + deltaPct;
+    // Clamp so neither panel collapses entirely
+    pct = Math.max(10, Math.min(90, pct));
+    termPanel.style.flex  = `0 0 ${pct}%`;
+    chatPanel.style.flex  = `1 1 auto`;
+    // Re-fit the xterm terminal so its grid matches the new pixel height
+    if (termFitAddon && termInstance) {
+      try { termFitAddon.fit(); } catch (_) {}
+    }
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    splitterEl.classList.remove("dragging");
+    document.body.style.userSelect = "";
+    // Final resize signal to the PTY
+    if (termInstance && termWs && termWs.readyState === WebSocket.OPEN) {
+      termWs.send(JSON.stringify({ type: "resize", cols: termInstance.cols, rows: termInstance.rows }));
+    }
+  });
+}
+const layoutBtns = {
+  chat: document.getElementById("layout-chat"),
+  both: document.getElementById("layout-both"),
+  cli:  document.getElementById("layout-cli"),
+};
+
+function setLayout(mode) {
+  // Reset any inline flex left over from a previous drag so the
+  // default 50/50 applies next time the user comes back to Both.
+  termPanel.style.flex = "";
+  chatPanel.style.flex = "";
+
+  if (mode === "chat") {
+    chatPanel.hidden = false;
+    termPanel.hidden = true;
+    if (splitterEl) splitterEl.hidden = true;
+    panelsEl.classList.remove("panels--split");
+  } else if (mode === "cli") {
+    chatPanel.hidden = true;
+    termPanel.hidden = false;
+    if (splitterEl) splitterEl.hidden = true;
+    panelsEl.classList.remove("panels--split");
+    ensureTerminal();
+  } else if (mode === "both") {
+    chatPanel.hidden = false;
+    termPanel.hidden = false;
+    if (splitterEl) splitterEl.hidden = false;
+    panelsEl.classList.add("panels--split");
+    ensureTerminal();
+  }
+  for (const k of Object.keys(layoutBtns)) {
+    layoutBtns[k]?.classList.toggle("active", k === mode);
+  }
+  // Re-fit after the layout has reflowed
+  if (termInstance && termFitAddon) {
+    requestAnimationFrame(() => {
+      try {
+        termFitAddon.fit();
+        const cols = termInstance.cols, rows = termInstance.rows;
+        if (termWs && termWs.readyState === WebSocket.OPEN) {
+          termWs.send(JSON.stringify({ type: "resize", cols, rows }));
+        }
+      } catch (_) {}
+    });
+  }
+}
+
+if (layoutBtns.chat) layoutBtns.chat.addEventListener("click", () => setLayout("chat"));
+if (layoutBtns.both) layoutBtns.both.addEventListener("click", () => setLayout("both"));
+if (layoutBtns.cli)  layoutBtns.cli.addEventListener("click",  () => setLayout("cli"));
+
 if (modelPicker) {
   modelPicker.addEventListener("change", () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: "set_model", model: modelPicker.value }));
+    chatStatus.model = modelPicker.value;
+    renderChatStatus();
   });
 }
 
@@ -579,6 +787,70 @@ if (modelPicker) {
 // the suffix before assigning so the option stays selected.
 function stripModelSuffix(m) {
   return m.replace(/\[[^\]]+\]$/, "");
+}
+
+// Drive the page theme via a data-theme="dark|light" attribute on
+// <html>. The CSS uses :root[data-theme="light"] / fallback to the
+// default dark for everything else. JS resolves "auto" against
+// matchMedia so it follows macOS, and listens for OS changes when
+// auto is in effect.
+let themeMediaQuery = null;
+let themeMediaListener = null;
+function applyTheme(theme) {
+  const root = document.documentElement;
+  // Detach any previous OS listener; we re-attach only for "auto".
+  if (themeMediaQuery && themeMediaListener) {
+    themeMediaQuery.removeEventListener("change", themeMediaListener);
+    themeMediaListener = null;
+  }
+
+  if (theme === "dark" || theme === "light") {
+    root.setAttribute("data-theme", theme);
+    syncTerminalTheme();
+    return;
+  }
+
+  // "auto" (or undefined) → follow the OS appearance preference and
+  // keep updating if it changes while the page is open.
+  themeMediaQuery = window.matchMedia("(prefers-color-scheme: light)");
+  const sync = () => {
+    root.setAttribute("data-theme", themeMediaQuery.matches ? "light" : "dark");
+    syncTerminalTheme();
+  };
+  sync();
+  themeMediaListener = sync;
+  themeMediaQuery.addEventListener("change", themeMediaListener);
+}
+
+// Push the current data-theme into the running xterm.js instance, if
+// any. Called from applyTheme() so the terminal background follows
+// the rest of the chrome instead of staying stuck on its boot value.
+function syncTerminalTheme() {
+  if (!termInstance) return;
+  try { termInstance.options.theme = currentTerminalTheme(); }
+  catch (_) {}
+}
+
+// Apply the OS-resolved theme at boot so the page isn't a flash of
+// the wrong colors before the WS `config` event arrives.
+applyTheme("auto");
+
+// State we accumulate from the WS so we can render a stable chat
+// status line (mode · model · port) regardless of which event last
+// arrived. Updated on `config`, `session_started`, and model picker
+// `change`. Re-rendered into the right-hand statusbar item via
+// renderChatStatus().
+const chatStatus = { mode: null, model: null, port: location.port || "5180" };
+function renderChatStatus() {
+  const dot = document.getElementById("chat-dot");
+  const txt = document.getElementById("chat-status-text");
+  if (!dot || !txt) return;
+  const bits = ["Chat:"];
+  if (chatStatus.mode) bits.push(chatStatus.mode.toUpperCase());
+  if (chatStatus.model) bits.push(chatStatus.model.replace(/^claude-/, ""));
+  bits.push("port " + chatStatus.port);
+  txt.textContent = bits.join(" · ");
+  dot.className = "dot dot--connected";
 }
 
 // Render the auth/runtime mode badge (CLI vs SDK) into the meta bar.

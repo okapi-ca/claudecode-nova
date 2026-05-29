@@ -504,8 +504,12 @@ async function startBridge() {
       env.CC_CHAT_PORT    = String(nova.config.get("claudecode.chat.port") || 5180);
       env.CC_CHAT_MODEL   = nova.config.get("claudecode.chat.model") || "claude-sonnet-4-6";
       // Pass the claude CLI path so chat-session.mjs can spawn it directly
-      // when running in fallback "cli" mode (no API key resolved).
+      // when running in fallback "cli" mode (no API key resolved), and
+      // so cli-session.mjs (embedded terminal panel) can launch the same
+      // binary with the same user-configured args.
       env.CC_CLAUDE_PATH = nova.workspace.config.get("claudecode.claudeCommand") || "claude";
+      env.CC_CLAUDE_ARGS = nova.workspace.config.get("claudecode.claudeArgs") || "";
+      env.CC_CHAT_THEME  = nova.config.get("claudecode.chat.theme") || "auto";
 
       if (apiKey) {
         env.ANTHROPIC_API_KEY = apiKey;

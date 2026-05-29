@@ -635,6 +635,9 @@ async function startServer() {
     connectedClients.push(client);
     log("info", "Claude Code client connected via WebSocket");
     sendToNova({ type: "client_connected", clientCount: connectedClients.length });
+    if (chatHandle && typeof chatHandle.pushBridgeStatus === "function") {
+      chatHandle.pushBridgeStatus({ port: serverPort, clientCount: connectedClients.length });
+    }
 
     socket.on("data", (data) => {
       client.buffer = Buffer.concat([client.buffer, data]);
@@ -664,6 +667,9 @@ async function startServer() {
       connectedClients = connectedClients.filter((c) => c !== client);
       log("info", `Claude Code client disconnected (hadError=${hadError})`);
       sendToNova({ type: "client_disconnected", clientCount: connectedClients.length });
+      if (chatHandle && typeof chatHandle.pushBridgeStatus === "function") {
+        chatHandle.pushBridgeStatus({ port: serverPort, clientCount: connectedClients.length });
+      }
     });
 
     socket.on("error", (err) => {
@@ -695,9 +701,30 @@ async function startServer() {
           model: CHAT_MODEL,
           claudePath: process.env.CC_CLAUDE_PATH || "claude",
           callNovaTool,
+          getBridgeInfo: () => ({
+            port: serverPort,
+            clientCount: connectedClients.length,
+          }),
           log,
         });
         log("info", `Chat server listening on http://127.0.0.1:${CHAT_PORT}/`);
+
+        // Mount the embedded terminal panel on the same HTTP server.
+        // Lives at /cli (WebSocket only). Each connection spawns
+        // `claude` in a real PTY via node-pty.
+        try {
+          const cliModule = await import("./cli-session.mjs");
+          cliModule.attach({
+            httpServer: chatHandle.httpServer,
+            claudeCommand: process.env.CC_CLAUDE_PATH || "claude",
+            claudeArgs: process.env.CC_CLAUDE_ARGS || "",
+            log,
+          });
+          log("info", "CLI terminal panel attached at /cli");
+        } catch (err) {
+          log("error", `Failed to attach CLI terminal panel: ${err.message}`);
+        }
+
         sendToNova({ type: "chat_started", port: CHAT_PORT });
       } catch (err) {
         log("error", `Failed to start chat server: ${err.message}`);

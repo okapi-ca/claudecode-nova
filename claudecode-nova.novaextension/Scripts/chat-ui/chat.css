@@ -666,8 +666,7 @@ body {
    setting. The chat follows automatically when macOS (and thus Nova
    when set to "automatic") flips to light mode. */
 
-@media (prefers-color-scheme: light) {
-  :root {
+:root[data-theme="light"] {
     --bg:           #ffffff;
     --bg-elevated:  #f5f5f7;
     --bg-input:     #f7f7f9;
@@ -686,34 +685,284 @@ body {
   }
 
   /* Patches for colors hardcoded outside :root */
-  .dot--idle               { background: #b0b0b8 !important; }
-  ::-webkit-scrollbar-thumb        { background: #cccdd2 !important; }
-  ::-webkit-scrollbar-thumb:hover  { background: #a8a9b0 !important; }
+[data-theme="light"] .dot--idle { background: #b0b0b8 !important; }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background: #cccdd2 !important; }
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: #a8a9b0 !important; }
 
-  .slash-menu                      { background: #ffffff; border-color: #d8d8dc; box-shadow: 0 6px 18px rgba(0,0,0,0.12); }
-  .slash-menu__item:hover,
-  .slash-menu__item.active         { background: #f0f0f3; }
-  .slash-menu__label               { color: #2b5bd8; }
+[data-theme="light"] .slash-menu { background: #ffffff; border-color: #d8d8dc; box-shadow: 0 6px 18px rgba(0,0,0,0.12); }
+[data-theme="light"] .slash-menu__item:hover,
+[data-theme="light"] .slash-menu__item.active { background: #f0f0f3; }
+[data-theme="light"] .slash-menu__label { color: #2b5bd8; }
 
-  #model-picker                    { background: #ffffff; color: #1d1d1f; border-color: #d8d8dc; }
-  #model-picker:hover              { border-color: #b8b8bf; }
+[data-theme="light"] #model-picker { background: #ffffff; color: #1d1d1f; border-color: #d8d8dc; }
+[data-theme="light"] #model-picker:hover { border-color: #b8b8bf; }
 
-  .btn--primary                    { color: #ffffff; }
-  .btn--primary:hover              { background: #4a72e0; }
+[data-theme="light"] .btn--primary { color: #ffffff; }
+[data-theme="light"] .btn--primary:hover { background: #4a72e0; }
 
-  .error-msg                       { background: rgba(196, 24, 24, 0.06); border-color: rgba(196, 24, 24, 0.3); }
+[data-theme="light"] .error-msg { background: rgba(196, 24, 24, 0.06); border-color: rgba(196, 24, 24, 0.3); }
 
-  .tool--running .tool__spinner    { border-color: rgba(0, 0, 0, 0.1); border-top-color: var(--accent-warm); }
+[data-theme="light"] .tool--running .tool__spinner { border-color: rgba(0, 0, 0, 0.1); border-top-color: var(--accent-warm); }
 
-  .meta-mode--cli                  { background: rgba(31, 141, 60, 0.12); color: #1f8d3c; border-color: rgba(31, 141, 60, 0.35); }
-  .meta-mode--sdk                  { background: rgba(43, 91, 216, 0.12); color: #2b5bd8; border-color: rgba(43, 91, 216, 0.35); }
+[data-theme="light"] .meta-mode--cli { background: rgba(31, 141, 60, 0.12); color: #1f8d3c; border-color: rgba(31, 141, 60, 0.35); }
+[data-theme="light"] .meta-mode--sdk { background: rgba(43, 91, 216, 0.12); color: #2b5bd8; border-color: rgba(43, 91, 216, 0.35); }
 
-  .thinking                        { background: rgba(181, 106, 8, 0.04); border-color: #e8c890; }
-  .thinking__header                { color: #8a5a0a; }
-  .thinking__header:hover          { background: rgba(181, 106, 8, 0.07); }
-  .thinking__spinner               { border-color: rgba(138, 90, 10, 0.2); border-top-color: #8a5a0a; }
-  .thinking.done .thinking__spinner{ background: #8a5a0a; }
-  .thinking__body                  { color: #7a5d3c; border-top-color: rgba(138, 90, 10, 0.15); }
+[data-theme="light"] .thinking { background: rgba(181, 106, 8, 0.04); border-color: #e8c890; }
+[data-theme="light"] .thinking__header { color: #8a5a0a; }
+[data-theme="light"] .thinking__header:hover { background: rgba(181, 106, 8, 0.07); }
+[data-theme="light"] .thinking__spinner { border-color: rgba(138, 90, 10, 0.2); border-top-color: #8a5a0a; }
+[data-theme="light"] .thinking.done .thinking__spinner { background: #8a5a0a; }
+[data-theme="light"] .thinking__body { color: #7a5d3c; border-top-color: rgba(138, 90, 10, 0.15); }
 
-  .pending                         { background: rgba(43, 91, 216, 0.06); border-color: rgba(43, 91, 216, 0.25); color: #2b5bd8; }
+[data-theme="light"] .pending { background: rgba(43, 91, 216, 0.06); border-color: rgba(43, 91, 216, 0.25); color: #2b5bd8; }
+
+/* ── layout toggle + panels (chat / terminal split) ─────────────── */
+
+.topbar__layout {
+  display: inline-flex;
+  gap: 2px;
+  margin: 0 8px;
+  background: rgba(0,0,0,0.15);
+  border-radius: 4px;
+  padding: 2px;
 }
+
+.layout-btn {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.layout-btn:hover { color: var(--text); }
+.layout-btn.active {
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--border) inset;
+}
+
+.panels {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.panels--split .chat,
+.panels--split .terminal {
+  flex: 1 1 50%;
+  min-height: 0;
+}
+
+.terminal {
+  display: flex;
+  flex-direction: column;
+  background: #0d0d0f;
+  border-top: 1px solid var(--border);
+  min-height: 0;
+  flex: 1; /* fill the panels area when terminal is the only visible panel */
+}
+
+.terminal__header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  font-size: 11px;
+}
+
+.terminal__title { color: var(--text); font-weight: 600; }
+.terminal__hint  { color: var(--text-muted); }
+.terminal__hint code {
+  background: rgba(255,255,255,0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.terminal__host {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px;
+  background: #0d0d0f;
+  overflow: hidden;
+}
+
+[data-theme="light"] .terminal { background: #fafafa; }
+[data-theme="light"] .terminal__host { background: #fafafa; }
+[data-theme="light"] .topbar__layout { background: rgba(0,0,0,0.05); }
+[data-theme="light"] .terminal__hint code { background: rgba(0,0,0,0.05); }
+
+/* ── force [hidden] to actually hide even when display: flex is set
+       on the same element (chat / terminal panels). User agent's
+       default [hidden] { display: none } gets beaten by our explicit
+       display: flex without this. */
+[hidden] { display: none !important; }
+
+/* ── chat panel wrapper (history + its own composer) ─────────────
+   The composer must stay attached to the chat panel, not float as a
+   global footer. Otherwise in "Both" mode it sits below the terminal
+   and is decoupled from the chat history. */
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.panels--split .chat-panel,
+.panels--split .terminal {
+  flex: 1 1 50%;
+  min-height: 0;
+}
+
+/* Re-target chat / composer inside the wrapper */
+.chat-panel > .chat {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-panel > .composer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* Visual separators for the header and (per-panel) composer */
+.topbar {
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.15);
+}
+
+[data-theme="light"] .topbar { box-shadow: 0 1px 0 rgba(0,0,0,0.04); }
+
+/* In "Both" mode put the terminal above the chat panel without
+   reshuffling DOM order. */
+.panels--split .terminal   { order: 1; }
+.panels--split .chat-panel { order: 2; }
+
+/* Clear visual separator between the two panels in Both mode. */
+.panels--split .chat-panel {
+  border-top: 2px solid var(--border);
+  box-shadow: 0 -1px 0 rgba(0,0,0,0.2);
+}
+
+[data-theme="light"] .panels--split .chat-panel {
+    box-shadow: 0 -1px 0 rgba(0,0,0,0.05);
+  }
+
+/* ── draggable splitter between terminal and chat in Both mode ──── */
+
+.splitter {
+  height: 6px;
+  background: var(--border);
+  cursor: row-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.splitter:hover,
+.splitter.dragging {
+  background: var(--accent);
+}
+
+/* In Both mode: terminal on top (order:1), splitter middle (order:2),
+   chat-panel bottom (order:3). Replaces the simple two-panel order
+   declared earlier — same selector, more entries. */
+.panels--split .terminal   { order: 1; }
+.panels--split .splitter   { order: 2; }
+.panels--split .chat-panel { order: 3; }
+
+/* When the user drags, we set inline flex on the panels — don't fight
+   it with our default 50/50. */
+.panels--split .terminal,
+.panels--split .chat-panel {
+  flex: 1 1 50%; /* default before any drag */
+}
+
+/* ── unified chrome: topbar + panels-frame + composer share the same
+       elevated background, so the chat/terminal panels float inside a
+       coloured frame instead of running edge-to-edge. ─────────────── */
+
+.topbar  { background: var(--bg-elevated); }
+
+.panels {
+  background: var(--bg-elevated);
+  padding: 10px 18px 14px; /* match .composer padding */
+  gap: 0;
+}
+
+/* Round the corners of the panels themselves so the frame looks like
+   a card surround. Inner panels keep their natural background. */
+.chat-panel,
+.terminal {
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* The splitter sits inside the framed area in Both mode — give it the
+   same vertical breathing room as the panels. */
+.panels--split .splitter {
+  margin: 4px 0;
+}
+
+/* ── darker chrome around the chat/terminal panels ───────────────
+   The topbar, the .panels frame, and the composer share a tone
+   that's *darker* than --bg-elevated so the inner panels (which keep
+   their natural background) read as "elevated" content sitting on
+   a darker chrome. Light-mode keeps the same hierarchy with a
+   slightly tinted off-white frame. */
+
+.topbar,
+.panels,
+.composer {
+  background: #15151a;
+}
+
+[data-theme="light"] .topbar,
+[data-theme="light"] .panels,
+[data-theme="light"] .composer {
+  background: #ececef;
+}
+
+/* Status indicator moved from the topbar into the composer meta bar
+   so the chat and chat-status info live together at the bottom. */
+.composer__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── persistent bridge statusbar (bottom of page, below composer) ─ */
+.statusbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px;
+  background: #15151a;
+  border-top: 1px solid var(--border);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.statusbar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+[data-theme="light"] .statusbar { background: #ececef; border-top-color: var(--border); }
+
+.statusbar__spacer { flex: 1; }
+.statusbar__item--right { justify-content: flex-end; }
