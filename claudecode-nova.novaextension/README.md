@@ -7,6 +7,8 @@
 [![Node: 18+](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org)
 [![Sponsor: LCI Education](https://img.shields.io/badge/Sponsor-LCI%20Education-orange)](https://www.lcieducation.com)
 
+![Claude Code Bridge for Nova in action](Images/screenshot.png)
+
 ## Why?
 
 Claude Code has official IDE integrations for VS Code and JetBrains, but nothing for Nova. If you love Nova's native macOS experience and want Claude Code's full agentic capabilities — context sharing, inline diffs, selection tracking — this extension bridges the gap.
@@ -52,6 +54,55 @@ The extension spawns a Node.js subprocess that runs a WebSocket server implement
 - **Sidebar tracking** — Three live sections: connection status, pending diffs queue with per-item Accept/Reject, and an activity log of file operations and diff outcomes (auto-refreshes every 30s)
 - **One-click launch** — Open Claude Code in iTerm or Terminal.app with the IDE-bridge env vars pre-set; the bridge connects automatically
 - **Secure by default** — Localhost-only WebSocket with UUID token authentication
+
+## Modes — Chat (web) and CLI panel (in-browser terminal)
+
+In addition to the traditional Mode A (Claude Code CLI in an external terminal talking to Nova through the MCP bridge), v0.6+ ships an opt-in browser-based chat surface and v0.13+ embeds a real terminal inside the same window. Both run on a single localhost HTTP server (default `http://127.0.0.1:5180/`) spawned by the extension.
+
+### Chat (web)
+
+A pure HTML/CSS/JS chat UI served by the bundled `chat-session.mjs`. Two backends are auto-selected:
+
+- **SDK mode** — when an Anthropic API key is resolved (Keychain → 1Password → direct config in that order), the chat drives Claude via `@anthropic-ai/claude-agent-sdk` in-process. You get streaming text, custom tool calls (12 Nova editor operations exposed as MCP tools), and the SDK's full event stream (`thinking_delta`, `tool_use`, `tool_result`, cost / usage). Billed against the API key.
+- **CLI fallback** — when no API key is configured, the chat spawns `claude -p ... --output-format stream-json --include-partial-messages` as a subprocess. Uses the user's existing Claude Code OAuth session (Pro / Max / Enterprise), so usage is covered by the subscription. Multi-turn via `--resume <session_id>`. The chat UI label badge says `CLI` instead of `SDK` so you know which one is active.
+
+What both modes have in common:
+
+- Slash commands `/explain` `/refactor` `/test` `/doc` `/fix` with a filterable menu (arrow keys, Enter/Tab)
+- "Auto-inject context" toggle that prepends the current Nova selection + file path to every prompt
+- Live model picker (Sonnet 4.6 / Haiku 4.5 / Opus 4.7 / Opus 4.8 1M) — switch mid-conversation, no restart
+- Streaming `💭 Reasoning…` collapsible block while Claude thinks before answering
+- "Resume…" button — lists per-workspace sessions from `~/.claude/projects/<encoded-cwd>/*.jsonl`, click replays the full transcript and continues with `--resume`
+- Theme follows macOS / Nova appearance (`@media (prefers-color-scheme)`) with a manual override setting if Nova's locked to a different mode
+
+### CLI panel (in-browser terminal)
+
+An embedded terminal inside the chat page powered by [xterm.js](https://xtermjs.org/) (client) + [node-pty](https://github.com/microsoft/node-pty) (server, real PTY via `posix_spawnp`). Spawns `claude` with the user-configured CLI command and args (`claudecode.claudeCommand` / `claudecode.claudeArgs`) and pipes input/output/resize over a WebSocket at `/cli`.
+
+This isn't a polished terminal emulator — it's literally `claude` running with a PTY backend. You get:
+
+- Raw mode + ANSI escape sequences + colors (Claude Code's TUI renders correctly)
+- All the official `claude` features that depend on TTY detection (interactive prompts, vim-style keybindings, `Esc+Enter` multiline)
+- Same `~/.claude/projects/<encoded-cwd>/*.jsonl` history Claude Code uses elsewhere — so a session you start here can be resumed from any other terminal and vice-versa
+- The full Claude Code skills / plugins / agents ecosystem (slash commands like `/architecture review`, sub-agents, hooks) — because the runtime is the real `claude` CLI
+
+### Layout toggle
+
+Three positions in the chat-page topbar:
+
+- **Chat** — chat panel only
+- **CLI** — terminal panel only
+- **Both** — terminal on top, chat below, with a draggable horizontal splitter (re-fits the xterm grid live as you drag and tells the PTY about the new dimensions)
+
+A single Anthropic conversation can span both panels in Both mode: ask Claude something in the chat, watch it use tools, then drop into the CLI to follow up — both surfaces share the same Claude Code session via `--resume`.
+
+### Where to open the chat window
+
+Three buttons in the "Open Claude Chat" command's action panel:
+
+- **Open in Nova Preview** — writes a small iframe wrapper file under the extension's global storage and opens it as a Nova editor tab; `Cmd+Shift+H` shows it in Nova's WebKit Preview, drag the tab to dock side-by-side with your code (closest approximation to VS Code's beside-panel webview that Nova's API allows)
+- **Open in Browser** — Safari / Firefox / your default
+- **Copy URL** — drop into any browser tab manually
 
 ## Requirements
 
