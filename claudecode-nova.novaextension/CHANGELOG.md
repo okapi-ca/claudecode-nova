@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.2 — 2026-05-29
+
+### Changed
+- **Apple Silicon only.** Stripped the `darwin-x64` node-pty
+  prebuild from the bundle alongside the win32/linux ones — Apple
+  is phasing out Intel Mac support and the binary was negligible
+  weight (64 KB), but keeping only `darwin-arm64` makes the
+  architectural intent explicit.
+
 ## 0.13.1 — 2026-05-29
 
 ### Fixed
