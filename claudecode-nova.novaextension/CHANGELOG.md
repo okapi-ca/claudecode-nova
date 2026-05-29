@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.12.1 — 2026-05-28
+
+### Added
+- **Chat UI follows the system / Nova theme.** The chat panel was
+  hardcoded dark and clashed when Nova / macOS were set to light
+  mode. A `@media (prefers-color-scheme: light)` block in `chat.css`
+  overrides every CSS variable plus the ~25 colors that were
+  hardcoded outside `:root` (slash menu, model picker, scrollbars,
+  CLI/SDK badge, thinking block, pending placeholder). The Nova
+  Preview tab is WebKit-backed and honours the macOS appearance, so
+  the whole panel flips automatically when the user toggles Light /
+  Dark — no setting, no reload.
+- `<meta name="color-scheme" content="light dark">` so native form
+  controls (`<select>`, `<input type="checkbox">`) follow the theme
+  too.
+- Highlight.js code blocks swap `atom-one-dark` ↔ `atom-one-light`
+  via media-scoped `<link>` tags so syntax-highlighted code stays
+  readable in either mode.
+- The `chat-frame.html` wrapper used by "Open in Nova Preview" got
+  a `color-scheme: light dark` declaration and a light-mode
+  background override so the iframe doesn't flash a dark background
+  on light systems while it loads.
+
 ## 0.12.0 — 2026-05-28
 
 ### Added
