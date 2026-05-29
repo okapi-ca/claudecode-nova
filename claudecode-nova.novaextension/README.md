@@ -7,7 +7,7 @@
 [![Node: 18+](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org)
 [![Sponsor: LCI Education](https://img.shields.io/badge/Sponsor-LCI%20Education-orange)](https://www.lcieducation.com)
 
-![Claude Code Bridge for Nova in action](Images/screenshot.png)
+![Claude Code Bridge for Nova in action](https://raw.githubusercontent.com/okapi-ca/claudecode-nova/main/docs/screenshot.png)
 
 ## Why?
 
