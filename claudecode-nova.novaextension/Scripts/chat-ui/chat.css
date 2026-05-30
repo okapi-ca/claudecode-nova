@@ -258,9 +258,10 @@ body {
    of code in single-line snippets. */
 .msg__body pre:has(.code-lang) { padding-top: 22px; }
 
-/* Per-message actions (Copy entire message) — hover-revealed,
-   positioned in the message wrapper's lower-right corner so they don't
-   compete with code-block buttons. */
+/* Per-message actions (Copy entire message) — hover-revealed, sit in
+   the 12 px gap between messages so they don't add layout height when
+   idle. The chat container's 20 px bottom padding catches the last
+   message's overflow so the button isn't clipped. */
 .msg {
   position: relative;
 }
@@ -268,12 +269,13 @@ body {
 .msg__actions {
   position: absolute;
   right: 6px;
-  bottom: -22px;
+  bottom: -16px;
   display: flex;
   gap: 4px;
   opacity: 0;
   transition: opacity 0.15s;
   pointer-events: none;
+  z-index: 2;
 }
 
 .msg:hover .msg__actions {
@@ -294,11 +296,6 @@ body {
 
 .msg__action:hover { color: var(--text); border-color: var(--accent); }
 .msg__action.copied { color: var(--success); border-color: var(--success); }
-
-/* Add bottom spacing on every message so the absolutely-positioned
-   actions don't clip into the next message. */
-.msg { margin-bottom: 16px; }
-.msg:last-child { margin-bottom: 0; }
 
 .code-copy:hover { color: var(--text); border-color: var(--accent); }
 .code-copy.copied { color: var(--success); border-color: var(--success); }

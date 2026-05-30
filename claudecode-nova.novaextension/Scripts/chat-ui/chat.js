@@ -39,11 +39,17 @@ let sessionCost   = 0;
 let sessionInTk   = 0;
 let sessionOutTk  = 0;
 let currentSessionId = null;  // backend session id; changes reset session counters
-const DAILY_KEY = "claudecode_cost_" + new Date().toISOString().slice(0, 10);
+
+// Resolve the daily key fresh every call so a chat window left open
+// across midnight starts incrementing the new day's bucket instead of
+// continuing to write yesterday's.
+function dailyKey() {
+  return "claudecode_cost_" + new Date().toISOString().slice(0, 10);
+}
 
 function loadDailyCost() {
   try {
-    const raw = localStorage.getItem(DAILY_KEY);
+    const raw = localStorage.getItem(dailyKey());
     if (!raw) return { cost: 0, inTk: 0, outTk: 0 };
     return JSON.parse(raw);
   } catch (e) {
@@ -52,7 +58,7 @@ function loadDailyCost() {
 }
 
 function saveDailyCost(daily) {
-  try { localStorage.setItem(DAILY_KEY, JSON.stringify(daily)); }
+  try { localStorage.setItem(dailyKey(), JSON.stringify(daily)); }
   catch (e) { /* localStorage full or unavailable — silent */ }
 }
 
