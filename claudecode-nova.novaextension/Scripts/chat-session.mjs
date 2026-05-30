@@ -118,6 +118,10 @@ export async function init(opts) {
       "Search the workspace for the user's query and summarize the relevant hits.\n\n1. Call `workspaceSearch` with the user's exact phrase (use `regex: false` for plain text, `regex: true` only if they typed a regex). Set `glob` if the user mentioned a file type or directory.\n2. Group the hits by file. For each group, show the file path and a short bulleted list of the lines (file:line — snippet).\n3. End with a one-sentence interpretation of what the hits suggest about the codebase.\n\nIf there are many hits, prioritize the ones that look like definitions / call sites over comments / test fixtures.",
     find:
       "Locate a symbol definition in the workspace.\n\nThe user's next message names a function / class / type / variable. Build a regex that matches its definition for the languages most likely in this workspace (e.g. JavaScript/TypeScript: `(function|const|class|interface|type|enum)\\s+<name>` ; Python: `(def|class)\\s+<name>` ; Go: `(func|type)\\s+<name>` ; Rust: `(fn|struct|enum|trait|impl)\\s+<name>`). Then call `workspaceSearch` with `regex: true` and that pattern.\n\nList each match as `<file>:<line>` with the matched line. If you find multiple definitions, mark which one is most likely the canonical implementation (usually the largest, or in src/lib, not tests).",
+    plan:
+      "Don't act on this request yet. First, break it into an ordered checklist of concrete steps.\n\nFor each step:\n- One sentence on what it accomplishes\n- The files / commands / decisions it involves\n- Anything it depends on from earlier steps\n\nEnd with: \"Reply OK to proceed, or tell me what to adjust.\" Then stop and wait — don't start executing until the user confirms.",
+    recap:
+      "Summarize the current conversation so far. Five bullets max:\n- The user's goal / topic\n- Key decisions or conclusions reached\n- Open questions still unresolved\n- Notable code / files touched\n- Suggested next step\n\nKeep it telegraphic — this is for the user to scan, not read.",
   };
 
   // Extract the text payload from an MCP tool result. Tool results come
@@ -394,6 +398,17 @@ export async function init(opts) {
           log("info", `chat: switching model ${model} → ${msg.model}`);
           model = msg.model;
         }
+        return;
+      }
+
+      if (msg.type === "reset_session") {
+        // /clear from the frontend — drop our memory of the active
+        // session so the next user_message starts fresh (no --resume).
+        if (currentSessionId) {
+          log("info", `chat: clearing session ${currentSessionId}`);
+        }
+        currentSessionId = null;
+        send({ type: "session_cleared" });
         return;
       }
 

@@ -51,6 +51,9 @@ const SLASH_COMMANDS = [
   { cmd: "why",          label: "/why",          desc: "Explain WHY the selected code exists (intent / constraints)" },
   { cmd: "search",       label: "/search",       desc: "Recursive grep across the workspace" },
   { cmd: "find",         label: "/find",         desc: "Locate a symbol definition" },
+  { cmd: "plan",         label: "/plan",         desc: "Plan steps before acting; wait for OK" },
+  { cmd: "recap",        label: "/recap",        desc: "Summarize the current conversation" },
+  { cmd: "clear",        label: "/clear",        desc: "Wipe the chat and start a fresh session" },
 ];
 
 // When the user picks a slash command, we send it as a flag and clear
@@ -474,6 +477,11 @@ function handleServerMessage(msg) {
       // user_message will carry --resume / resume:.
       break;
 
+    case "session_cleared":
+      // Backend confirmed /clear; nothing to add — the marker is
+      // already in place from runClearCommand().
+      break;
+
     case "bridge_status": {
       const dot = document.getElementById("bridge-dot");
       const txt = document.getElementById("bridge-text");
@@ -668,12 +676,49 @@ function pickActiveSlashCommand() {
 }
 
 function pickSlashCommand(cmd) {
+  // /clear is a frontend-only action — wipe the transcript and tell
+  // the backend to drop currentSessionId. We don't send anything to
+  // the LLM.
+  if (cmd === "clear") {
+    runClearCommand();
+    hideSlashMenu();
+    return;
+  }
   pendingSlashCommand = cmd;
   // Clear the "/foo" the user typed and let them add extra context if they want
   inputEl.value = "";
   inputEl.placeholder = `/${cmd} — add any extra context, then press Enter (or Enter again to send as-is)`;
   hideSlashMenu();
   inputEl.focus();
+}
+
+// Local wipe — does NOT call the LLM. Clears the chat history DOM
+// and tells chat-session.mjs to forget currentSessionId so the next
+// user_message starts a brand-new conversation.
+function runClearCommand() {
+  // Drop every message bubble, tool card, thinking block, marker.
+  while (chatEl.firstChild) chatEl.removeChild(chatEl.firstChild);
+  currentAssistantBubble = null;
+  currentAssistantBuffer = "";
+  currentThinkingBody = null;
+  currentThinkingBuffer = "";
+  if (currentPendingEl) { currentPendingEl.remove(); currentPendingEl = null; }
+  toolCardsByName.length = 0;
+  historyToolCards.length = 0;
+  // Reset the meta bar info that ties to a specific session.
+  if (metaSess) metaSess.textContent = "";
+  if (metaCost) metaCost.textContent = "";
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "reset_session" }));
+  }
+
+  const marker = document.createElement("div");
+  marker.className = "history-marker";
+  marker.textContent = "↻ Session cleared — next message starts fresh";
+  chatEl.appendChild(marker);
+  setStatus("connected", "Ready");
+  inputEl.placeholder = "Ask Claude… (type / for slash commands · Enter to send · Shift+Enter for newline)";
 }
 
 function onInputChange() {
