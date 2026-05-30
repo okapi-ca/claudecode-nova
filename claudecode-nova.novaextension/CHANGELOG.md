@@ -1,5 +1,78 @@
 # Changelog
 
+## 0.15.0 — 2026-05-30
+
+### Added — slash command catalog more than quadrupled
+
+19 new slash commands across 6 categories. The chat composer's
+`/` menu now offers 24 ready-made prompts that follow conventions
+the team already uses (Conventional Commits, Keep-A-Changelog,
+OWASP).
+
+**Code on selection** (Phase 1 — 6 new) :
+- `/review`   — style + bugs + security, ranked by severity
+- `/optimize` — perf / memory improvements with before / after
+- `/simplify` — extract / flatten / dead-code removal
+- `/types`    — idiomatic type annotations without behavior change
+- `/security` — focused OWASP-style review with CWE references
+- `/rename`   — clearer identifier names with rationale
+
+**Git-driven** (Phase 2-3 — 3 new) :
+- `/commit`     — drafts a Conventional Commit from the current
+                  diff. Backed by a new `getGitDiff` Nova MCP tool
+                  (Process-spawned `git diff` with optional staged
+                  / range / stat, 64 KB cap).
+- `/changelog`  — detects the last release tag, reads commits since,
+                  groups under Keep-A-Changelog headings. Uses the
+                  new `getGitLog` tool.
+- `/pr`         — reads `main..HEAD` log + diff stat, produces the
+                  full PR template (Summary / What changed / Test
+                  plan).
+
+**Workspace** (Phase 4 — 4 new) :
+- `/explain-error` — diagnoses a stack trace: What broke / Where /
+                     Why / Fix.
+- `/why`           — explains *intent* behind selected code, not
+                     what it does (problem solved, alternatives
+                     rejected, invariants maintained).
+- `/search`        — literal grep across the workspace, grouped by
+                     file. Backed by a new `workspaceSearch` tool
+                     (`/usr/bin/grep -rIn` with the usual exclude-
+                     dirs and a 200-hit cap).
+- `/find`          — locates a symbol definition: builds a
+                     language-aware definition regex and calls
+                     `workspaceSearch`.
+
+**Conversation** (Phase 5 — 3 new) :
+- `/plan`  — break the request into an ordered checklist and *stop*;
+             wait for OK before executing.
+- `/recap` — five-bullet summary of the current conversation.
+- `/clear` — frontend-only wipe of the chat + `reset_session` so
+             the next user_message starts a brand-new conversation.
+
+**Documentation** (Phase 6 — 3 new) :
+- `/spec`    — turns the conversation into a markdown spec.
+- `/readme`  — calls `getWorkspaceFolders`, sniffs project layout,
+                produces a full README.
+- `/api-doc` — extracts the public API surface of the selected code
+                (signature / summary / params / returns / throws /
+                example per export).
+
+### Added — new Nova MCP tools backing the commands
+
+- `getGitDiff`      — `git diff` with optional `staged` / `range` /
+                      `stat` / `maxBytes`. Returns the raw diff +
+                      truncation flag.
+- `getGitLog`       — `git log` with `range` / `limit` / `format`
+                      (`oneline` / `subject` / `full`) / `maxBytes`.
+- `workspaceSearch` — `grep -rIn` with `query` / `regex` / `glob` /
+                      `maxHits` / `maxBytes`, parsed into
+                      `{file, line, text}` records.
+
+All three are also surfaced to the chat SDK via
+`chat-tool-wrappers.mjs`. In CLI mode Claude reaches the same data
+through its native Bash tool.
+
 ## 0.14.2 — 2026-05-30
 
 ### Documentation
