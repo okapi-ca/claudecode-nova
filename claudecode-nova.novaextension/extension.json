@@ -3,7 +3,7 @@
   "name": "Claude Code Bridge",
   "organization": "okapi-ca",
   "description": "Native Claude Code integration for Nova. The MCP bridge wires the Claude Code CLI to your editor (selection sharing, inline diff review, file ops). An opt-in chat panel runs Claude via the Anthropic SDK or your existing Claude Pro/Max subscription — slash commands, live model picker, streaming reasoning, and a real in-window terminal powered by node-pty. Resume any past session from the sidebar in one click.",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "categories": ["commands", "sidebars"],
   "license": "MIT",
   "repository": "https://github.com/okapi-ca/claudecode-nova",

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.16.0 — 2026-05-30
+
+### Added — two new Nova MCP tools for the chat SDK
+
+**`applyEditAtSelection`** lets the chat write directly into the active
+Nova editor at the current selection — skipping the diff review flow
+for self-contained rewrites like `/refactor`, `/simplify`, `/rename`.
+Trailing newline is stripped by default (override with
+`trimTrailingNewline: false`). Returns the new range + byte counts so
+the model can confirm what it actually changed.
+
+**`runShellCommand`** spawns `/bin/sh -c <command>` in the workspace
+(or an explicit `cwd`), captures stdout + stderr with per-stream byte
+caps (default 64 KB), and SIGTERMs the process after `timeoutMs`
+(default 30 s). Intentionally permissive — no safe-list — so the chat
+can drive `npm test`, `git checkout`, `git commit`, ad-hoc inspection
+commands, etc. Returns `{code, stdout, stderr, timedOut, truncated,
+durationMs}`.
+
+Both tools are exposed to the chat SDK as `mcp__nova__applyEditAtSelection`
+and `mcp__nova__runShellCommand` with full Zod input schemas. They cover
+most of the gap where Claude previously had to fall back to clipboard
+copy-paste or the diff review flow for trivial edits.
+
 ## 0.15.0 — 2026-05-30
 
 ### Added — slash command catalog more than quadrupled
