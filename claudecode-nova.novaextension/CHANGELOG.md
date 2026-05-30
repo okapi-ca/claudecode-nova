@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.16.1 — 2026-05-30
+
+### Docs — README overhauled (root + bundle)
+
+The root and bundle READMEs had drifted significantly behind reality.
+Both have been brought up to v0.16.0:
+
+- **Tools table** now lists all 14 tools across two columns (Bridge /
+  Chat SDK) — adds the 5 SDK-only tools (`getGitDiff`, `getGitLog`,
+  `workspaceSearch`, `applyEditAtSelection`, `runShellCommand`)
+- **Slash commands** updated from the original 5 to the current 24,
+  organized by category (code-on-selection / git-driven / workspace /
+  conversation / documentation)
+- **Sidebar** now correctly describes the 6 live sections (was 3) —
+  adds Recent Sessions, Claude Code Version, Chat UI Status
+- **Commands table** completes the 11-entry list — adds Restart, Open
+  Chat in Browser, Set/Clear Chat API Key, Check for Updates
+- **Configuration** tables exhaustively cover all 17 global keys +
+  2 per-project keys (was 6 + 1)
+- **Architecture file tree** matches actual `Scripts/` contents
+- **Release notes** redirect to `CHANGELOG.md` (single source of
+  truth, no more drift)
+- **Future ideas** drops items already shipped (apply-edit-at-
+  selection, spawn-terminal-command) and surfaces what's actually
+  next
+- Removed the large "How It Works" ASCII box diagram — the
+  paragraph that followed says the same thing in less screen space
+
 ## 0.16.0 — 2026-05-30
 
 ### Added — two new Nova MCP tools for the chat SDK
