@@ -202,6 +202,50 @@ export function buildNovaToolsServer({ callNovaTool, log }) {
         maxBytes:  z.number().int().optional().describe("Cap captured output per stream (default 65536)."),
       },
     ),
+
+    // ── Write file ───────────────────────────────────────────────
+    wrap(
+      "writeFile",
+      "Create or overwrite a file at the given path. Prefer this over `runShellCommand` with heredocs — it's safer (no shell escaping pitfalls) and reports byte counts. Use mode `wx` for safe-create that fails if the file exists.",
+      {
+        path:       z.string().describe("Absolute path, or path relative to the workspace root."),
+        content:    z.string().describe("Text content to write."),
+        mode:       z.enum(["w", "a", "wx"]).optional().describe("`w` overwrites (default), `a` appends, `wx` fails if the file already exists."),
+        createDirs: z.boolean().optional().describe("Create missing parent directories first (like `mkdir -p`)."),
+      },
+    ),
+
+    // ── File exists ──────────────────────────────────────────────
+    wrap(
+      "fileExists",
+      "Stat a path and return existence + type + size + mtime. Use before `writeFile` with mode `w` to confirm you're not silently clobbering something the user cares about, or before `openFile` to give a clean error.",
+      {
+        path: z.string().describe("Absolute path, or path relative to the workspace root."),
+      },
+    ),
+
+    // ── Notify ───────────────────────────────────────────────────
+    wrap(
+      "notify",
+      "Show a non-blocking Nova notification. Use for completion signals on long-running tasks (build done, tests passed) or to surface a warning without interrupting the chat flow. Don't spam — one notification per task.",
+      {
+        title: z.string().describe("Headline shown in the notification banner."),
+        body:  z.string().optional().describe("Secondary text under the title."),
+        type:  z.enum(["info", "warning", "error"]).optional().describe("Severity hint — controls the title prefix icon (default `info`)."),
+      },
+    ),
+
+    // ── Ask user ─────────────────────────────────────────────────
+    wrap(
+      "askUser",
+      "Block and ask the user a question via a native Nova modal. With `options` you get a button-choice action panel (returns selectedIndex + selectedValue). Without `options`, you get a free-text input palette (returns text). Use sparingly — prefer asking in-chat unless the question is a clear binary or short text-input decision blocking the next step.",
+      {
+        question:     z.string().describe("Prompt text shown to the user."),
+        options:      z.array(z.string()).min(2).max(4).optional().describe("2–4 button labels for the action panel. Omit for free-text input."),
+        placeholder:  z.string().optional().describe("Placeholder text for free-text input mode."),
+        defaultValue: z.string().optional().describe("Pre-filled value for free-text input mode."),
+      },
+    ),
   ];
 
   return {

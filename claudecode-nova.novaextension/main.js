@@ -801,6 +801,18 @@ async function handleToolCall(msg) {
       case "runShellCommand":
         result = await toolRunShellCommand(args);
         break;
+      case "writeFile":
+        result = await toolWriteFile(args);
+        break;
+      case "fileExists":
+        result = await toolFileExists(args);
+        break;
+      case "notify":
+        result = await toolNotify(args);
+        break;
+      case "askUser":
+        result = await toolAskUser(args);
+        break;
       default:
         result = { error: "Unknown tool: " + tool };
     }
@@ -1469,6 +1481,195 @@ function toolRunShellCommand(args) {
 
     try { proc.start(); }
     catch (e) { clearTimeout(timer); resolve({ error: "shell start failed: " + e.message }); }
+  });
+}
+
+// --- writeFile ---
+//
+// Create or overwrite a file. nova.fs.open accepts modes:
+//   "w"  → truncate + write   (default — overwrites if exists)
+//   "a"  → append
+//   "wx" → fail if file already exists (safe-create)
+//
+// args:
+//   path: string             → required, absolute or workspace-relative
+//   content: string          → required, text content
+//   mode?: "w" | "a" | "wx"  → default "w"
+//   createDirs?: boolean     → mkdir -p the parent dir first (default false)
+//
+// Returns: { ok, path, bytes, mode } or { error }
+function toolWriteFile(args) {
+  if (!args || typeof args.path !== "string" || !args.path) {
+    return Promise.resolve({ error: "path (string) is required" });
+  }
+  if (typeof args.content !== "string") {
+    return Promise.resolve({ error: "content (string) is required" });
+  }
+  var mode = (args.mode === "a" || args.mode === "wx") ? args.mode : "w";
+  var path = args.path;
+  if (!nova.path.isAbsolute(path)) {
+    if (!nova.workspace.path) {
+      return Promise.resolve({ error: "Relative path requires an open workspace" });
+    }
+    path = nova.path.join(nova.workspace.path, path);
+  }
+
+  // Safe-create: bail if file exists.
+  if (mode === "wx") {
+    if (nova.fs.stat(path)) {
+      return Promise.resolve({ error: "File already exists: " + path });
+    }
+    mode = "w";
+  }
+
+  // Optional parent-dir creation. Walks up the path and mkdirs each missing
+  // segment. We only create one level at a time because nova.fs.mkdir doesn't
+  // accept a recursive flag.
+  if (args.createDirs) {
+    var parent = nova.path.dirname(path);
+    var toCreate = [];
+    var cursor = parent;
+    while (cursor && cursor !== "/" && !nova.fs.stat(cursor)) {
+      toCreate.unshift(cursor);
+      cursor = nova.path.dirname(cursor);
+    }
+    for (var i = 0; i < toCreate.length; i++) {
+      try { nova.fs.mkdir(toCreate[i]); }
+      catch (err) { return Promise.resolve({ error: "mkdir failed at " + toCreate[i] + ": " + err.message }); }
+    }
+  }
+
+  try {
+    var file = nova.fs.open(path, mode);
+    file.write(args.content);
+    file.close();
+    return Promise.resolve({
+      ok: true,
+      path: path,
+      bytes: args.content.length,
+      mode: mode,
+    });
+  } catch (err) {
+    return Promise.resolve({ error: "write failed: " + (err && err.message ? err.message : String(err)) });
+  }
+}
+
+// --- fileExists ---
+//
+// Stat a path and report what's there. Returns { exists: false } cleanly
+// when nothing matches — not an error.
+//
+// args:
+//   path: string  → required, absolute or workspace-relative
+//
+// Returns: { exists, isFile, isDirectory, isSymlink, size, mtime, path } or { error }
+function toolFileExists(args) {
+  if (!args || typeof args.path !== "string" || !args.path) {
+    return Promise.resolve({ error: "path (string) is required" });
+  }
+  var path = args.path;
+  if (!nova.path.isAbsolute(path)) {
+    if (!nova.workspace.path) {
+      return Promise.resolve({ error: "Relative path requires an open workspace" });
+    }
+    path = nova.path.join(nova.workspace.path, path);
+  }
+  var st;
+  try { st = nova.fs.stat(path); }
+  catch (err) { return Promise.resolve({ error: "stat failed: " + err.message }); }
+  if (!st) {
+    return Promise.resolve({ exists: false, path: path });
+  }
+  return Promise.resolve({
+    exists: true,
+    path: path,
+    isFile: !!st.isFile,
+    isDirectory: !!st.isDirectory,
+    isSymlink: !!st.isSymbolicLink,
+    size: typeof st.size === "number" ? st.size : null,
+    mtime: st.mtime ? st.mtime.toISOString() : null,
+  });
+}
+
+// --- notify ---
+//
+// Push a non-blocking notification to the user. No actions = pure info
+// banner. `type` is a hint (we prefix the title accordingly because Nova's
+// NotificationRequest doesn't expose a severity field).
+//
+// args:
+//   title: string                       → required
+//   body?: string                       → optional body text
+//   type?: "info" | "warning" | "error" → default "info"
+//
+// Returns: { ok, id }
+function toolNotify(args) {
+  if (!args || typeof args.title !== "string" || !args.title) {
+    return Promise.resolve({ error: "title (string) is required" });
+  }
+  var type = (args.type === "warning" || args.type === "error") ? args.type : "info";
+  var prefix = (type === "error") ? "⚠️  " : (type === "warning" ? "⚠️  " : "ℹ️  ");
+  var id = "claude-notify-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+  try {
+    var req = new NotificationRequest(id);
+    req.title = prefix + args.title;
+    if (typeof args.body === "string" && args.body) req.body = args.body;
+    nova.notifications.add(req);
+    return Promise.resolve({ ok: true, id: id, type: type });
+  } catch (err) {
+    return Promise.resolve({ error: "notify failed: " + err.message });
+  }
+}
+
+// --- askUser ---
+//
+// Block until the user answers via a native Nova modal. Two flavors:
+//   * options provided → showActionPanel (button choice)
+//   * options absent   → showInputPalette (free text)
+//
+// args:
+//   question: string      → required, prompt text
+//   options?: string[]    → 2–4 button labels for action panel
+//   placeholder?: string  → input palette placeholder (free-text mode only)
+//   defaultValue?: string → pre-filled input (free-text mode only)
+//
+// Returns:
+//   action-panel mode → { selectedIndex, selectedValue } or { cancelled: true }
+//   free-text   mode → { text }                          or { cancelled: true }
+function toolAskUser(args) {
+  if (!args || typeof args.question !== "string" || !args.question) {
+    return Promise.resolve({ error: "question (string) is required" });
+  }
+  return new Promise(function(resolve) {
+    try {
+      if (Array.isArray(args.options) && args.options.length >= 2) {
+        nova.workspace.showActionPanel(
+          args.question,
+          { buttons: args.options.slice(0, 4) },
+          function(idx) {
+            if (typeof idx !== "number" || idx < 0) {
+              resolve({ cancelled: true });
+            } else {
+              resolve({ selectedIndex: idx, selectedValue: args.options[idx] });
+            }
+          }
+        );
+      } else {
+        nova.workspace.showInputPalette(
+          args.question,
+          {
+            placeholder: args.placeholder || "",
+            value: args.defaultValue || "",
+          },
+          function(value) {
+            if (value == null) resolve({ cancelled: true });
+            else resolve({ text: value });
+          }
+        );
+      }
+    } catch (err) {
+      resolve({ error: "ask failed: " + err.message });
+    }
   });
 }
 
