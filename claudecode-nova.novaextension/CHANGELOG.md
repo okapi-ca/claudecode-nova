@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.19.0 — 2026-05-30
+
+### UI overhaul — chat styling, cost tracking, multimodal, sidebar
+
+**Chat styling polish**
+- Every fenced code block now shows its detected syntax (uppercase
+  label, top-left of the `<pre>`) — `TYPESCRIPT`, `SQL`, `JSON`, etc.
+  Extracted from highlight.js's auto-detected class.
+- Every message bubble now has a hover-revealed action row in the
+  lower-right with a `Copy` button. Reads the body text fresh so
+  streaming assistant messages copy the current state. Works on user,
+  assistant, and replayed history messages.
+
+**Cost / token tracking cumulatif**
+- The composer meta bar now shows `last $X.XXXX · session $Y.YYYY ·
+  today $Z.ZZZZ` (previously: only `last cost`).
+- Daily total persists to `localStorage` keyed by ISO date —
+  survives page reloads, resets at midnight local time.
+- Session total resets when the backend starts a fresh session
+  (different ID) or when the user runs `/clear`.
+- Detailed token breakdown (last / session / today, input / output)
+  is in the meta bar's tooltip so the visible text stays compact.
+
+**Multimodal — drag-drop + paste images** (SDK mode only)
+- Drop zone overlay shown on dragenter anywhere on the page. Drop
+  one or more PNG / JPEG / GIF / WebP files into the composer to
+  attach them to the next message.
+- `Cmd+V` paste into the input also captures clipboard images (e.g.
+  a screenshot from `Shift+Cmd+Ctrl+4`).
+- Thumbnails appear above the input with a remove button (`×`) per
+  image. Too-large images (> 5 MB Anthropic limit) are flagged and
+  skipped on send.
+- Backend serialises attachments into the SDK's `image` content
+  blocks (`type: "image"`, `source: { type: "base64", media_type,
+  data }`) and combines with the text prompt.
+- CLI mode rejects attachments with a clear error message — `claude
+  -p` doesn't accept inline images.
+
+**Sidebar UX polish**
+- Pending Diffs row now shows diff stats inline in the descriptive
+  text (`+12 -3 · 5s ago`) so the user can triage a 1-line tweak vs.
+  a 80-line rewrite at-a-glance without hovering.
+- Recent Sessions row now shows the captured git branch inline next
+  to the relative time (`feature/auth-rewrite · 2h ago`) —
+  disambiguates sessions across feature branches.
+- Recent Sessions tooltip wording updated to reflect the v0.7+ multi-
+  destination resume flow (chat / CLI panel / terminal / clipboard).
+
 ## 0.18.0 — 2026-05-30
 
 ### Added — six more Nova-native MCP tools (SDK catalog now 24)
