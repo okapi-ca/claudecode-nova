@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.18.0 — 2026-05-30
+
+### Added — six more Nova-native MCP tools (SDK catalog now 24)
+
+This release closes the remaining gaps in the Nova-tool catalog
+identified during the v0.16/v0.17 audit. The chat now has direct,
+typed access to filesystem traversal, fine-grained editor edits,
+on-disk find/replace, clipboard, and document lifecycle.
+
+**`listDirectory`** uses `nova.fs.listdir` + `stat` to return
+`[{name, isFile, isDirectory, isSymlink, size}]` for a given path.
+Optional `recursive: true` walks subdirs (skips `.git`, `node_modules`,
+`dist`, `build`, `.next`, `.venv`, `__pycache__`). Capped at
+`maxEntries` (default 500) — sets `truncated: true` if hit.
+
+**`insertAtCursor`** inserts text at the active editor's cursor
+*without* replacing the selection. Distinct from `applyEditAtSelection`
+(which replaces). If a selection exists, text is inserted at the
+selection start; selection is preserved.
+
+**`replaceInFile`** runs a find/replace pass directly on disk via
+`nova.fs.open(r/w)` — no editor involvement. Literal substitution by
+default; `regex: true` with optional `flags` for pattern matching
+(forces `g` flag if missing). `maxReplacements` caps substitution
+count. Useful when `applyEditAtSelection` is too narrow but a full
+diff review would be overkill.
+
+**`clipboardWrite`** puts text on the macOS clipboard via
+`nova.clipboard.writeText`. Asymmetric with the existing `readText`
+side — the chat now both reads context from the clipboard and writes
+generated snippets back.
+
+**`openNewTextDocument`** creates an unsaved Nova document with
+optional initial `content` + `syntax` hint (e.g. `markdown`,
+`typescript`). Useful for scratch drafts before deciding the save
+target with `writeFile`.
+
+**`getOpenDocuments`** returns every TextDocument Nova has open
+(including background tabs without an active editor). Different from
+`getOpenEditors`, which is editor-instance-scoped. Each entry exposes
+`{path, uri, isDirty, isUntitled, isClosed, syntax, length, eol}`.
+
+All six are wrapped in `chat-tool-wrappers.mjs` with Zod schemas and
+exposed as `mcp__nova__listDirectory`, `mcp__nova__insertAtCursor`,
+`mcp__nova__replaceInFile`, `mcp__nova__clipboardWrite`,
+`mcp__nova__openNewTextDocument`, `mcp__nova__getOpenDocuments`.
+
+The SDK's tool catalog goes from 18 (v0.17.0) to **24**.
+
 ## 0.17.0 — 2026-05-30
 
 ### Added — four more Nova-native MCP tools for the chat SDK
