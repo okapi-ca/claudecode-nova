@@ -813,6 +813,24 @@ async function handleToolCall(msg) {
       case "askUser":
         result = await toolAskUser(args);
         break;
+      case "listDirectory":
+        result = await toolListDirectory(args);
+        break;
+      case "insertAtCursor":
+        result = await toolInsertAtCursor(args);
+        break;
+      case "replaceInFile":
+        result = await toolReplaceInFile(args);
+        break;
+      case "clipboardWrite":
+        result = await toolClipboardWrite(args);
+        break;
+      case "openNewTextDocument":
+        result = await toolOpenNewTextDocument(args);
+        break;
+      case "getOpenDocuments":
+        result = await toolGetOpenDocuments(args);
+        break;
       default:
         result = { error: "Unknown tool: " + tool };
     }
@@ -1671,6 +1689,283 @@ function toolAskUser(args) {
       resolve({ error: "ask failed: " + err.message });
     }
   });
+}
+
+// --- listDirectory ---
+//
+// Walk a directory and return entries. Shallow by default; pass
+// `recursive: true` to walk subdirs (capped at maxEntries to keep
+// payloads manageable).
+//
+// args:
+//   path: string             → required, absolute or workspace-relative
+//   recursive?: boolean      → default false
+//   maxEntries?: number      → default 500
+//   includeHidden?: boolean  → include dot-files (default false)
+//
+// Returns: { entries: [{name, isFile, isDirectory, isSymlink, size}], path, truncated }
+function toolListDirectory(args) {
+  if (!args || typeof args.path !== "string" || !args.path) {
+    return Promise.resolve({ error: "path (string) is required" });
+  }
+  var path = args.path;
+  if (!nova.path.isAbsolute(path)) {
+    if (!nova.workspace.path) {
+      return Promise.resolve({ error: "Relative path requires an open workspace" });
+    }
+    path = nova.path.join(nova.workspace.path, path);
+  }
+  var st;
+  try { st = nova.fs.stat(path); }
+  catch (err) { return Promise.resolve({ error: "stat failed: " + err.message }); }
+  if (!st) return Promise.resolve({ error: "Path does not exist: " + path });
+  if (!st.isDirectory) return Promise.resolve({ error: "Not a directory: " + path });
+
+  var maxEntries = (Number.isInteger(args.maxEntries) && args.maxEntries > 0) ? args.maxEntries : 500;
+  var recursive = !!args.recursive;
+  var includeHidden = !!args.includeHidden;
+  var SKIP_DIRS = { ".git": 1, "node_modules": 1, "dist": 1, "build": 1, ".next": 1, ".venv": 1, "__pycache__": 1 };
+  var entries = [];
+  var truncated = false;
+
+  function walk(dir, relPrefix) {
+    if (truncated) return;
+    var names;
+    try { names = nova.fs.listdir(dir); }
+    catch (err) { return; }
+    for (var i = 0; i < names.length; i++) {
+      if (truncated) return;
+      var name = names[i];
+      if (!includeHidden && name.charAt(0) === ".") continue;
+      var full = nova.path.join(dir, name);
+      var s;
+      try { s = nova.fs.stat(full); } catch (e) { continue; }
+      if (!s) continue;
+      var displayName = relPrefix ? (relPrefix + "/" + name) : name;
+      entries.push({
+        name: displayName,
+        isFile: !!s.isFile,
+        isDirectory: !!s.isDirectory,
+        isSymlink: !!s.isSymbolicLink,
+        size: typeof s.size === "number" ? s.size : null,
+      });
+      if (entries.length >= maxEntries) { truncated = true; return; }
+      if (recursive && s.isDirectory && !SKIP_DIRS[name]) {
+        walk(full, displayName);
+      }
+    }
+  }
+  walk(path, "");
+  return Promise.resolve({ path: path, entries: entries, truncated: truncated });
+}
+
+// --- insertAtCursor ---
+//
+// Insert text at the active editor's cursor without replacing the
+// selection. If there *is* a selection, text is inserted at the start
+// of the selection (selection itself is unchanged). For replace-on-
+// selection semantics use applyEditAtSelection.
+//
+// args:
+//   text: string  → required
+//
+// Returns: { ok, file, offset, range: {start, end} } or { error }
+function toolInsertAtCursor(args) {
+  if (!args || typeof args.text !== "string") {
+    return Promise.resolve({ error: "text (string) is required" });
+  }
+  var editor = nova.workspace.activeTextEditor;
+  if (!editor) return Promise.resolve({ error: "No active text editor" });
+  var range = editor.selectedRange;
+  var offset = range ? range.start : 0;
+
+  return editor.edit(function(edit) {
+    edit.insert(offset, args.text);
+  }).then(function() {
+    var doc = editor.document;
+    return {
+      ok: true,
+      file: doc.path || doc.uri,
+      offset: offset,
+      range: { start: offset, end: offset + args.text.length },
+    };
+  }, function(err) {
+    return { error: "insert failed: " + (err && err.message ? err.message : String(err)) };
+  });
+}
+
+// --- replaceInFile ---
+//
+// Find/replace inside a specific file's content. Reads the file via
+// nova.fs.open(r), substitutes, writes back via nova.fs.open(w). Does
+// NOT touch the editor — operates on disk. If the file is currently
+// open in an editor, Nova may prompt to reload (standard external-edit
+// behaviour).
+//
+// args:
+//   path: string         → required
+//   find: string         → required, literal text (or regex if regex=true)
+//   replace: string      → required, replacement
+//   regex?: boolean      → treat find as JS RegExp (default false)
+//   flags?: string       → regex flags, default "g" when regex=true
+//   maxReplacements?: number → cap to N substitutions (default unlimited)
+//
+// Returns: { ok, path, replacements, bytesBefore, bytesAfter } or { error }
+function toolReplaceInFile(args) {
+  if (!args || typeof args.path !== "string" || !args.path) {
+    return Promise.resolve({ error: "path (string) is required" });
+  }
+  if (typeof args.find !== "string" || !args.find) {
+    return Promise.resolve({ error: "find (non-empty string) is required" });
+  }
+  if (typeof args.replace !== "string") {
+    return Promise.resolve({ error: "replace (string) is required" });
+  }
+  var path = args.path;
+  if (!nova.path.isAbsolute(path)) {
+    if (!nova.workspace.path) {
+      return Promise.resolve({ error: "Relative path requires an open workspace" });
+    }
+    path = nova.path.join(nova.workspace.path, path);
+  }
+  var st;
+  try { st = nova.fs.stat(path); }
+  catch (err) { return Promise.resolve({ error: "stat failed: " + err.message }); }
+  if (!st || !st.isFile) return Promise.resolve({ error: "Not a file: " + path });
+
+  var content;
+  try {
+    var fr = nova.fs.open(path, "r");
+    content = fr.read() || "";
+    fr.close();
+  } catch (err) {
+    return Promise.resolve({ error: "read failed: " + err.message });
+  }
+  var before = content.length;
+  var replacements = 0;
+  var cap = (Number.isInteger(args.maxReplacements) && args.maxReplacements > 0) ? args.maxReplacements : Infinity;
+  var next;
+
+  if (args.regex) {
+    var flags = (typeof args.flags === "string" && args.flags) ? args.flags : "g";
+    if (flags.indexOf("g") === -1) flags += "g";
+    var re;
+    try { re = new RegExp(args.find, flags); }
+    catch (err) { return Promise.resolve({ error: "invalid regex: " + err.message }); }
+    next = content.replace(re, function(match) {
+      if (replacements >= cap) return match;
+      replacements++;
+      // RegExp.replace doesn't pass `replace` here — we used the literal
+      // `args.replace` already evaluated against `match` via the standard
+      // $-substitution rules below.
+      return args.replace.replace(/\$&/g, match);
+    });
+  } else {
+    // Literal find — split + join for an O(n) full-replace.
+    var parts = content.split(args.find);
+    if (parts.length === 1) {
+      next = content;
+    } else if (cap === Infinity) {
+      next = parts.join(args.replace);
+      replacements = parts.length - 1;
+    } else {
+      var head = parts.slice(0, cap + 1).join(args.replace);
+      var tail = parts.slice(cap + 1).join(args.find);
+      next = head + (tail ? args.find + tail : "");
+      replacements = cap;
+    }
+  }
+
+  if (replacements === 0) {
+    return Promise.resolve({
+      ok: true, path: path, replacements: 0,
+      bytesBefore: before, bytesAfter: before, unchanged: true,
+    });
+  }
+
+  try {
+    var fw = nova.fs.open(path, "w");
+    fw.write(next);
+    fw.close();
+  } catch (err) {
+    return Promise.resolve({ error: "write failed: " + err.message });
+  }
+  return Promise.resolve({
+    ok: true, path: path,
+    replacements: replacements,
+    bytesBefore: before, bytesAfter: next.length,
+  });
+}
+
+// --- clipboardWrite ---
+//
+// Put text on the macOS clipboard. Useful when Claude generates
+// something the user will paste elsewhere (snippet for a wiki, a
+// command to run in a different terminal, etc.).
+//
+// args:
+//   text: string  → required
+//
+// Returns: { ok, bytes } or { error }
+function toolClipboardWrite(args) {
+  if (!args || typeof args.text !== "string") {
+    return Promise.resolve({ error: "text (string) is required" });
+  }
+  return nova.clipboard.writeText(args.text).then(function() {
+    return { ok: true, bytes: args.text.length };
+  }, function(err) {
+    return { error: "clipboard write failed: " + (err && err.message ? err.message : String(err)) };
+  });
+}
+
+// --- openNewTextDocument ---
+//
+// Open a new unsaved document with optional initial content + syntax
+// hint. Useful for scratch drafts (a spec being authored, a command
+// list being assembled) before deciding whether/where to save.
+//
+// args:
+//   content?: string  → initial document body
+//   syntax?: string   → Nova syntax identifier (e.g. "markdown", "typescript")
+//
+// Returns: { ok, isUntitled, syntax? } or { error }
+function toolOpenNewTextDocument(args) {
+  var opts = {};
+  if (args && typeof args.content === "string") opts.content = args.content;
+  if (args && typeof args.syntax === "string" && args.syntax) opts.syntax = args.syntax;
+  try {
+    nova.workspace.openNewTextDocument(opts);
+    return Promise.resolve({ ok: true, isUntitled: true, syntax: opts.syntax || null });
+  } catch (err) {
+    return Promise.resolve({ error: "openNewTextDocument failed: " + err.message });
+  }
+}
+
+// --- getOpenDocuments ---
+//
+// Returns every TextDocument Nova has open (including background ones
+// with no active editor). Different from getOpenEditors, which only
+// returns currently-visible editor instances. Useful when Claude needs
+// to know what files are loaded even if not focused.
+//
+// Returns: { documents: [{ path, uri, isDirty, isUntitled, isClosed, syntax, length, eol }] }
+function toolGetOpenDocuments() {
+  var docs = nova.workspace.textDocuments || [];
+  var out = [];
+  for (var i = 0; i < docs.length; i++) {
+    var d = docs[i];
+    out.push({
+      path: d.path || null,
+      uri: d.uri || null,
+      isDirty: !!d.isDirty,
+      isUntitled: !!d.isUntitled,
+      isClosed: !!d.isClosed,
+      syntax: d.syntax || null,
+      length: typeof d.length === "number" ? d.length : null,
+      eol: d.eol || null,
+    });
+  }
+  return Promise.resolve({ documents: out });
 }
 
 // --- closeAllDiffTabs ---

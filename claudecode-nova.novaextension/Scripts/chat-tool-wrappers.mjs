@@ -246,6 +246,67 @@ export function buildNovaToolsServer({ callNovaTool, log }) {
         defaultValue: z.string().optional().describe("Pre-filled value for free-text input mode."),
       },
     ),
+
+    // ── List directory ───────────────────────────────────────────
+    wrap(
+      "listDirectory",
+      "List entries in a directory via `nova.fs.listdir`. Returns name + isFile + isDirectory + isSymlink + size for each entry. Recursive walk skips `.git` / `node_modules` / `dist` etc. Faster than `runShellCommand('ls')` for browsing project structure.",
+      {
+        path:          z.string().describe("Absolute path, or relative to the workspace root."),
+        recursive:     z.boolean().optional().describe("Walk subdirectories (skipping common heavy dirs). Default false."),
+        maxEntries:    z.number().int().optional().describe("Cap on total entries returned (default 500). Sets truncated:true if hit."),
+        includeHidden: z.boolean().optional().describe("Include dot-files (default false)."),
+      },
+    ),
+
+    // ── Insert at cursor ─────────────────────────────────────────
+    wrap(
+      "insertAtCursor",
+      "Insert text at the active editor's cursor without replacing the selection. Distinct from `applyEditAtSelection` (which replaces). If the editor has a selection, text is inserted at the selection start — selection is preserved.",
+      {
+        text: z.string().describe("Text to insert at the cursor."),
+      },
+    ),
+
+    // ── Replace in file ──────────────────────────────────────────
+    wrap(
+      "replaceInFile",
+      "Find-and-replace inside a specific file's content (on disk, not via the editor). Literal substitution by default; pass regex:true with optional flags for pattern matching. Useful for targeted refactors where a full diff review would be overkill but `applyEditAtSelection` is too narrow.",
+      {
+        path:            z.string().describe("Absolute path or workspace-relative."),
+        find:            z.string().describe("Text to find (literal, or JS RegExp source if regex:true)."),
+        replace:         z.string().describe("Replacement text. Use `$&` to reference the match when regex:true."),
+        regex:           z.boolean().optional().describe("Treat `find` as a JS RegExp (default false)."),
+        flags:           z.string().optional().describe("Regex flags (default 'g'; 'g' is force-added if missing)."),
+        maxReplacements: z.number().int().optional().describe("Cap on number of substitutions (default unlimited)."),
+      },
+    ),
+
+    // ── Clipboard write ──────────────────────────────────────────
+    wrap(
+      "clipboardWrite",
+      "Put text on the macOS clipboard via `nova.clipboard.writeText`. Useful when generating a snippet the user will paste outside Nova (a Slack message, a wiki page, a different terminal).",
+      {
+        text: z.string().describe("Text to copy to the clipboard."),
+      },
+    ),
+
+    // ── Open new text document ───────────────────────────────────
+    wrap(
+      "openNewTextDocument",
+      "Open a fresh unsaved Nova document with optional initial content + syntax hint. Use for scratch drafts (spec being authored, command list being assembled) before deciding whether and where to save with `writeFile`.",
+      {
+        content: z.string().optional().describe("Initial document body."),
+        syntax:  z.string().optional().describe("Nova syntax identifier (e.g. 'markdown', 'typescript', 'javascript', 'json')."),
+      },
+    ),
+
+    // ── Get open documents ───────────────────────────────────────
+    wrap(
+      "getOpenDocuments",
+      "Return every TextDocument Nova has open, including those without an active editor (background tabs). Differs from `getOpenEditors` (visible editors only). Use to know what files are loaded across Nova even if not focused.",
+      {},
+    ),
   ];
 
   return {
