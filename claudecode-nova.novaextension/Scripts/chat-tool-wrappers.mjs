@@ -180,6 +180,28 @@ export function buildNovaToolsServer({ callNovaTool, log }) {
         maxBytes: z.number().int().optional().describe("Cap stdout (default 262144)"),
       },
     ),
+
+    // ── Apply edit at selection ──────────────────────────────────
+    wrap(
+      "applyEditAtSelection",
+      "Replace the currently-selected text in the active Nova editor with new content. Use this for self-contained, no-review rewrites where a full diff would be overkill (small refactor, rename, fix). Fails if there is no active editor or no selection. For multi-file or larger changes, use the diff flow instead.",
+      {
+        text: z.string().describe("Replacement text. Trailing newline is stripped unless trimTrailingNewline is false."),
+        trimTrailingNewline: z.boolean().optional().describe("If false, keep a trailing \\n in the replacement (default true)."),
+      },
+    ),
+
+    // ── Run shell command ────────────────────────────────────────
+    wrap(
+      "runShellCommand",
+      "Spawn `/bin/sh -c <command>` in the workspace and capture stdout/stderr. Use this for ad-hoc shell ops (npm scripts, git checkout/commit/push, build steps, file inspection). The command runs unsandboxed with the user's privileges — be explicit about what you're doing in your messages. Output is capped per stream and the process is SIGTERMed after timeoutMs.",
+      {
+        command:   z.string().describe("Shell command line, e.g. `npm test` or `git checkout -b feature/foo`."),
+        cwd:       z.string().optional().describe("Override the working directory (defaults to workspace root)."),
+        timeoutMs: z.number().int().optional().describe("Terminate after N milliseconds (default 30000)."),
+        maxBytes:  z.number().int().optional().describe("Cap captured output per stream (default 65536)."),
+      },
+    ),
   ];
 
   return {

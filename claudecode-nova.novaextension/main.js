@@ -795,6 +795,12 @@ async function handleToolCall(msg) {
       case "workspaceSearch":
         result = await toolWorkspaceSearch(args);
         break;
+      case "applyEditAtSelection":
+        result = await toolApplyEditAtSelection(args);
+        break;
+      case "runShellCommand":
+        result = await toolRunShellCommand(args);
+        break;
       default:
         result = { error: "Unknown tool: " + tool };
     }
@@ -1348,6 +1354,121 @@ function toolGetGitLog(args) {
     });
     try { proc.start(); }
     catch (e) { resolve({ error: "git start failed: " + e.message }); }
+  });
+}
+
+// --- applyEditAtSelection ---
+//
+// Replace the current selection in the active TextEditor with new text.
+// Used by chat slash commands like /refactor or /simplify when the model
+// returns a self-contained replacement that doesn't need a diff review.
+//
+// args:
+//   text: string             → required, the replacement
+//   trimTrailingNewline?: boolean → strip a trailing \n from text (default true)
+//
+// Returns: { ok, file, line, replaced } or { error }
+function toolApplyEditAtSelection(args) {
+  if (!args || typeof args.text !== "string") {
+    return Promise.resolve({ error: "text (string) is required" });
+  }
+  var editor = nova.workspace.activeTextEditor;
+  if (!editor) return Promise.resolve({ error: "No active text editor" });
+  var range = editor.selectedRange;
+  if (!range) return Promise.resolve({ error: "No selection in active editor" });
+  var trim = (args.trimTrailingNewline !== false);
+  var newText = trim ? args.text.replace(/\n$/, "") : args.text;
+  var beforeLen = range.length;
+
+  return editor.edit(function(edit) {
+    edit.replace(range, newText);
+  }).then(function() {
+    var doc = editor.document;
+    return {
+      ok: true,
+      file: doc.path || doc.uri,
+      range: { start: range.start, end: range.start + newText.length },
+      replacedBytes: beforeLen,
+      insertedBytes: newText.length,
+    };
+  }, function(err) {
+    return { error: "edit failed: " + (err && err.message ? err.message : String(err)) };
+  });
+}
+
+// --- runShellCommand ---
+//
+// Spawn /bin/sh -c <command> in the workspace (or args.cwd), capture
+// stdout + stderr, enforce a timeout. Intentionally permissive: no
+// safe-list. Marc gates access by deciding which prompts/skills can
+// invoke it — the SDK already gates tool-use behind the chat UI.
+//
+// args:
+//   command: string         → required, shell command line
+//   cwd?: string            → override workspace path
+//   timeoutMs?: number      → SIGTERM after N ms (default 30000)
+//   maxBytes?: number       → cap captured output per stream (default 64 KB)
+//
+// Returns: { ok, code, signal, stdout, stderr, timedOut, truncated, durationMs }
+function toolRunShellCommand(args) {
+  if (!args || typeof args.command !== "string" || !args.command.trim()) {
+    return Promise.resolve({ error: "command (string) is required" });
+  }
+  var cwd = (args.cwd && typeof args.cwd === "string") ? args.cwd : nova.workspace.path;
+  if (!cwd) return Promise.resolve({ error: "No workspace open and no cwd provided" });
+  var timeoutMs = (Number.isInteger(args.timeoutMs) && args.timeoutMs > 0) ? args.timeoutMs : 30000;
+  var maxBytes = (Number.isInteger(args.maxBytes) && args.maxBytes > 0) ? args.maxBytes : 64 * 1024;
+
+  return new Promise(function(resolve) {
+    var proc;
+    try {
+      proc = new Process("/bin/sh", {
+        args: ["-c", args.command],
+        cwd: cwd,
+        stdio: "pipe",
+      });
+    } catch (err) {
+      resolve({ error: "shell spawn failed: " + err.message });
+      return;
+    }
+    var out = "";
+    var err = "";
+    var outTrunc = false;
+    var errTrunc = false;
+    var startedAt = Date.now();
+    var timedOut = false;
+
+    proc.onStdout(function(chunk) {
+      if (out.length + chunk.length <= maxBytes) out += chunk;
+      else { out += chunk.slice(0, Math.max(0, maxBytes - out.length)); outTrunc = true; }
+    });
+    proc.onStderr(function(chunk) {
+      if (err.length + chunk.length <= maxBytes) err += chunk;
+      else { err += chunk.slice(0, Math.max(0, maxBytes - err.length)); errTrunc = true; }
+    });
+
+    var timer = setTimeout(function() {
+      timedOut = true;
+      try { proc.terminate(); } catch (e) {}
+    }, timeoutMs);
+
+    proc.onDidExit(function(code) {
+      clearTimeout(timer);
+      resolve({
+        ok: !timedOut && code === 0,
+        code: code,
+        command: args.command,
+        cwd: cwd,
+        stdout: out,
+        stderr: err,
+        timedOut: timedOut,
+        truncated: outTrunc || errTrunc,
+        durationMs: Date.now() - startedAt,
+      });
+    });
+
+    try { proc.start(); }
+    catch (e) { clearTimeout(timer); resolve({ error: "shell start failed: " + e.message }); }
   });
 }
 
