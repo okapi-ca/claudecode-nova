@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.14.2 — 2026-05-30
+
+### Documentation
+- **Expanded catalog description.** The Panic Library listing was
+  still running the v0.2-era one-liner that only mentioned the MCP
+  bridge. The new `extension.json:description` covers all three
+  pillars (MCP bridge, chat panel, embedded terminal), the
+  SDK-or-Pro/Max-subscription auth twist, and session resume in
+  four short sentences so first-time browsers see the actual
+  surface area of the extension at a glance.
+
 ## 0.14.1 — 2026-05-29
 
 ### Fixed
