@@ -40,7 +40,7 @@ In addition to the traditional Mode A (Claude Code CLI in an external terminal t
 
 A pure HTML/CSS/JS chat UI served by the bundled `chat-session.mjs`. Two backends are auto-selected:
 
-- **SDK mode** — when an Anthropic API key is resolved (Keychain → 1Password → direct config in that order), the chat drives Claude via `@anthropic-ai/claude-agent-sdk` in-process. You get streaming text, custom tool calls (14 Nova editor + workspace operations exposed as MCP tools), and the SDK's full event stream (`thinking_delta`, `tool_use`, `tool_result`, cost / usage). Billed against the API key.
+- **SDK mode** — when an Anthropic API key is resolved (Keychain → 1Password → direct config in that order), the chat drives Claude via `@anthropic-ai/claude-agent-sdk` in-process. You get streaming text, custom tool calls (18 Nova editor + workspace operations exposed as MCP tools), and the SDK's full event stream (`thinking_delta`, `tool_use`, `tool_result`, cost / usage). Billed against the API key.
 - **CLI fallback** — when no API key is configured, the chat spawns `claude -p ... --output-format stream-json --include-partial-messages` as a subprocess. Uses the user's existing Claude Code OAuth session (Pro / Max / Enterprise), so usage is covered by the subscription. Multi-turn via `--resume <session_id>`. The chat UI label badge says `CLI` instead of `SDK` so you know which one is active.
 
 What both modes have in common:
@@ -158,6 +158,10 @@ Two surfaces use tools:
 | `workspaceSearch` | ✅ Full | — | ✓ | Recursive grep (skips `.git`, `node_modules`, `dist`, …) with optional regex + glob. Drives `/search`, `/find`. |
 | `applyEditAtSelection` | ✅ Full | — | ✓ | Replace the active editor's current selection with new text — skips the diff review flow for self-contained rewrites (`/refactor`, `/simplify`, `/rename`). |
 | `runShellCommand` | ✅ Full | — | ✓ | Spawn `/bin/sh -c <command>` with stdout/stderr caps + timeout. Drives ad-hoc shell ops (build, test, git push, inspection). |
+| `writeFile` | ✅ Full | — | ✓ | Create or overwrite a file via `nova.fs.open`. Modes `w` / `a` / `wx` (safe-create). Optional `createDirs` for `mkdir -p` parent. Safer than heredoc-via-shell. |
+| `fileExists` | ✅ Full | — | ✓ | Stat a path and return `{exists, isFile, isDirectory, isSymlink, size, mtime}`. Returns `{exists:false}` cleanly when nothing's there. |
+| `notify` | ✅ Full | — | ✓ | Push a non-blocking Nova notification (info / warning / error). Useful for completion signals on long-running tasks. |
+| `askUser` | ✅ Full | — | ✓ | Block on a native Nova modal — action panel (2–4 button options) or input palette (free text). Returns `{selectedIndex, selectedValue}` / `{text}` / `{cancelled}`. |
 | `close_tab` | ❌ Not supported | — | — | Nova exposes no public API to close an editor tab — see [Known Limitations §6](#known-limitations). Not advertised in `tools/list`. |
 | `executeCode` | ❌ Not supported | — | — | Nova has no Jupyter kernel integration. Not advertised in `tools/list`. |
 

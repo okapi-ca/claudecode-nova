@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.17.0 — 2026-05-30
+
+### Added — four more Nova-native MCP tools for the chat SDK
+
+These close the most painful gaps where Claude was bidouilling around
+missing primitives — `writeFile` via `runShellCommand` heredocs,
+asking questions in-chat instead of using Nova's native modal, etc.
+
+**`writeFile`** creates or overwrites a file using `nova.fs.open`.
+Modes: `w` (default, truncate + write), `a` (append), `wx`
+(safe-create — fails if the file exists). Optional `createDirs`
+flag walks the parent path and `mkdir`s missing segments. Returns
+`{ ok, path, bytes, mode }`. Safer than the `runShellCommand` +
+heredoc workaround (no shell escaping pitfalls, no PTY quirks).
+
+**`fileExists`** stats a path with `nova.fs.stat` and returns
+`{ exists, isFile, isDirectory, isSymlink, size, mtime }`. Returns
+`{ exists: false }` cleanly — not an error — when nothing matches.
+Use before destructive writes to confirm intent.
+
+**`notify`** pushes a non-blocking Nova notification via
+`NotificationRequest`. Optional `type` (`info` / `warning` / `error`)
+controls a title-prefix icon. Returns `{ ok, id }`. Useful for "build
+done" / "tests passed" signals when the chat is in the background.
+
+**`askUser`** blocks until the user answers via a native Nova modal.
+Two flavors auto-selected from the args:
+- With `options: [...]` → `showActionPanel` (2–4 button choice),
+  returns `{ selectedIndex, selectedValue }`
+- Without options → `showInputPalette` (free text with optional
+  `placeholder` + `defaultValue`), returns `{ text }`
+- User dismissal returns `{ cancelled: true }`
+
+Both are exposed to the chat SDK as `mcp__nova__writeFile`,
+`mcp__nova__fileExists`, `mcp__nova__notify`, and
+`mcp__nova__askUser`. The chat now has 18 in-process Nova tools
+(was 14 in v0.16.0).
+
 ## 0.16.1 — 2026-05-30
 
 ### Docs — README overhauled (root + bundle)
