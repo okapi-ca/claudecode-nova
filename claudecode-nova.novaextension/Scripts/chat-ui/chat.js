@@ -44,7 +44,9 @@ const SLASH_COMMANDS = [
   { cmd: "test",     label: "/test",     desc: "Write tests" },
   { cmd: "doc",      label: "/doc",      desc: "Add inline documentation" },
   { cmd: "fix",      label: "/fix",      desc: "Find and fix bugs" },
-  { cmd: "commit",   label: "/commit",   desc: "Draft a commit message from current diff" },
+  { cmd: "commit",    label: "/commit",    desc: "Draft a commit message from current diff" },
+  { cmd: "changelog", label: "/changelog", desc: "Generate next CHANGELOG entry from commits" },
+  { cmd: "pr",        label: "/pr",        desc: "Draft a PR description (summary + changes + test plan)" },
 ];
 
 // When the user picks a slash command, we send it as a flag and clear

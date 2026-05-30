@@ -789,6 +789,9 @@ async function handleToolCall(msg) {
       case "getGitDiff":
         result = await toolGetGitDiff(args);
         break;
+      case "getGitLog":
+        result = await toolGetGitLog(args);
+        break;
       default:
         result = { error: "Unknown tool: " + tool };
     }
@@ -1179,6 +1182,76 @@ function toolGetGitDiff(args) {
         command: ["git"].concat(gitArgs).join(" "),
         cwd: workspace,
         diff: truncated ? out.slice(0, maxBytes) : out,
+        truncated: truncated,
+        empty: out.trim().length === 0,
+      });
+    });
+    try { proc.start(); }
+    catch (e) { resolve({ error: "git start failed: " + e.message }); }
+  });
+}
+
+// --- getGitLog ---
+//
+// Run `git log` in the workspace root and return the commit list.
+// Used by /changelog and /pr to ground generated copy in actual
+// commit history.
+//
+// args:
+//   range?: string   → e.g. "v0.14.2..HEAD" or "main..feature/x"
+//   limit?: number   → max commits returned (default 50)
+//   format?: string  → "oneline" (sha + subject), "subject" (one
+//                      subject per line), "full" (subject + body),
+//                      defaults to "oneline"
+//   maxBytes?: number → cap output size (default 64 KB)
+function toolGetGitLog(args) {
+  var workspace = nova.workspace.path;
+  if (!workspace) {
+    return Promise.resolve({ error: "No workspace open" });
+  }
+  var fmt = (args && args.format) || "oneline";
+  var limit = (args && Number.isInteger(args.limit)) ? args.limit : 50;
+  var maxBytes = (args && Number.isInteger(args.maxBytes)) ? args.maxBytes : 64 * 1024;
+  var gitArgs = ["log", "--no-color", "-n", String(limit)];
+
+  if (fmt === "oneline") {
+    gitArgs.push("--pretty=format:%h %s");
+  } else if (fmt === "subject") {
+    gitArgs.push("--pretty=format:%s");
+  } else if (fmt === "full") {
+    gitArgs.push("--pretty=format:%h %s%n%n%b%n---");
+  } else {
+    return Promise.resolve({ error: "Unknown format: " + fmt });
+  }
+  if (args && typeof args.range === "string" && args.range.trim()) {
+    gitArgs.push(args.range.trim());
+  }
+
+  return new Promise(function(resolve) {
+    var proc;
+    try {
+      proc = new Process("/usr/bin/env", {
+        args: ["git", "-C", workspace].concat(gitArgs),
+        stdio: "pipe",
+      });
+    } catch (err) {
+      resolve({ error: "git spawn failed: " + err.message });
+      return;
+    }
+    var out = "";
+    var err = "";
+    proc.onStdout(function(chunk) { if (out.length < maxBytes) out += chunk; });
+    proc.onStderr(function(chunk) { err += chunk; });
+    proc.onDidExit(function(code) {
+      if (code !== 0 && !out) {
+        resolve({ error: "git exit " + code + ": " + err.trim() });
+        return;
+      }
+      var truncated = out.length >= maxBytes;
+      resolve({
+        command: ["git"].concat(gitArgs).join(" "),
+        cwd: workspace,
+        log: truncated ? out.slice(0, maxBytes) : out,
         truncated: truncated,
         empty: out.trim().length === 0,
       });

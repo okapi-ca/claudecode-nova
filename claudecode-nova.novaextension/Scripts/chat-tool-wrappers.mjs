@@ -155,6 +155,18 @@ export function buildNovaToolsServer({ callNovaTool, log }) {
         maxBytes: z.number().int().optional().describe("Cap output size (default 65536). Truncated output sets truncated:true."),
       },
     ),
+
+    // ── Git log (drives /changelog, /pr) ─────────────────────────
+    wrap(
+      "getGitLog",
+      "Run git log and return the commit list. Use with a range (e.g. last-tag..HEAD or main..HEAD) to ground changelog entries and PR descriptions in real commit messages.",
+      {
+        range:    z.string().optional().describe("Git range, e.g. v0.14.2..HEAD or main..HEAD"),
+        limit:    z.number().int().optional().describe("Max commits returned (default 50)"),
+        format:   z.enum(["oneline", "subject", "full"]).optional().describe("oneline = `<sha> <subject>`, subject = one subject per line, full = subject + body (defaults to oneline)"),
+        maxBytes: z.number().int().optional().describe("Cap output size (default 65536)"),
+      },
+    ),
   ];
 
   return {
