@@ -92,6 +92,20 @@ export async function init(opts) {
       "Add inline documentation to the selected code: JSDoc for JS/TS, docstrings for Python, doc comments for the file's idiomatic style. Don't change behavior.",
     fix:
       "Find any bugs, logic errors, or potential issues in the selected code and propose fixes. If the code looks correct, say so explicitly rather than inventing problems.",
+    review:
+      "Review the selected code for style, correctness, and security issues. Rank findings by severity (blocker / major / minor / nit) and explain each in one sentence.",
+    optimize:
+      "Suggest performance and memory improvements for the selected code. Show a before / after with a one-line justification of the gain (algorithmic complexity, allocations avoided, etc.). Skip premature optimizations.",
+    simplify:
+      "Simplify the selected code: extract sub-functions where it helps readability, remove dead branches, flatten nesting, and prefer idiomatic constructs. Show the cleaner version and note what changed.",
+    types:
+      "Add idiomatic type annotations to the selected code (TypeScript types, Python type hints, JSDoc, etc.) without changing the runtime behavior. Pick the language's most natural style.",
+    security:
+      "Run a focused security review of the selected code: input validation, injection vectors, auth/authz holes, secret leakage, unsafe deserialization, OWASP Top 10. Reference CWE numbers when relevant.",
+    rename:
+      "Suggest clearer names for the variables, functions, types, and parameters in the selected code. List each old → new with a one-line rationale. Don't rewrite the logic.",
+    commit:
+      "Propose a Conventional Commit message for the workspace's current uncommitted changes.\n\n1. First, call the `getGitDiff` tool (or run `git diff` if the tool is unavailable) — try staged changes first (`staged: true`); if empty, fall back to unstaged.\n2. Read the diff and write a commit message in the Conventional Commits style: `<type>(<scope>): <subject>` followed by a blank line and a wrapped body explaining the *why* (one short paragraph or a few bullets).\n3. Use the type taxonomy the repo's recent commits use (see `git log -5` if uncertain).\n4. End with the message in a single ```text code block ready to copy.",
   };
 
   // Extract the text payload from an MCP tool result. Tool results come

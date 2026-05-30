@@ -143,6 +143,18 @@ export function buildNovaToolsServer({ callNovaTool, log }) {
         code: z.string().describe("Code to execute"),
       },
     ),
+
+    // ── Git diff (drives /commit, /changelog, /pr) ───────────────
+    wrap(
+      "getGitDiff",
+      "Run git diff in the workspace and return the raw output. Use this before writing commit messages, changelog entries, or PR descriptions so the copy is grounded in actual changes.",
+      {
+        staged:   z.boolean().optional().describe("Pass --cached to diff staged changes only"),
+        range:    z.string().optional().describe("Git range like main..HEAD or v0.14.1..HEAD"),
+        stat:     z.boolean().optional().describe("Pass --stat for a summary instead of full hunks"),
+        maxBytes: z.number().int().optional().describe("Cap output size (default 65536). Truncated output sets truncated:true."),
+      },
+    ),
   ];
 
   return {

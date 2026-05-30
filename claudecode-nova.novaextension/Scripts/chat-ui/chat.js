@@ -35,9 +35,16 @@ let currentPendingEl = null; // pre-content "Claude is thinking…" placeholder
 const SLASH_COMMANDS = [
   { cmd: "explain",  label: "/explain",  desc: "Explain the selected code" },
   { cmd: "refactor", label: "/refactor", desc: "Refactor for clarity" },
+  { cmd: "review",   label: "/review",   desc: "Review for style + bugs + security" },
+  { cmd: "optimize", label: "/optimize", desc: "Suggest perf / memory improvements" },
+  { cmd: "simplify", label: "/simplify", desc: "Reduce complexity (extract / flatten)" },
+  { cmd: "types",    label: "/types",    desc: "Add idiomatic type annotations" },
+  { cmd: "security", label: "/security", desc: "Focused OWASP-style security review" },
+  { cmd: "rename",   label: "/rename",   desc: "Suggest clearer identifier names" },
   { cmd: "test",     label: "/test",     desc: "Write tests" },
   { cmd: "doc",      label: "/doc",      desc: "Add inline documentation" },
   { cmd: "fix",      label: "/fix",      desc: "Find and fix bugs" },
+  { cmd: "commit",   label: "/commit",   desc: "Draft a commit message from current diff" },
 ];
 
 // When the user picks a slash command, we send it as a flag and clear

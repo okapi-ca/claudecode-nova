@@ -786,6 +786,9 @@ async function handleToolCall(msg) {
       case "executeCode":
         result = toolExecuteCode(args);
         break;
+      case "getGitDiff":
+        result = await toolGetGitDiff(args);
+        break;
       default:
         result = { error: "Unknown tool: " + tool };
     }
@@ -1124,6 +1127,65 @@ function toolCloseTab(args) {
 // isError=true and know not to retry.
 function toolExecuteCode(args) {
   return { error: "executeCode is not supported in Nova (no Jupyter kernel)" };
+}
+
+// --- getGitDiff ---
+//
+// Run `git diff` (or `git diff --cached` for staged-only, or a range
+// like `main..HEAD`) in the workspace root and return stdout. Used by
+// the /commit /changelog /pr slash commands so Claude can write
+// commit / changelog / PR copy grounded in actual changes.
+//
+// args:
+//   staged?: boolean  → adds --cached
+//   range?: string    → e.g. "main..HEAD" or "v0.14.1..HEAD"
+//   stat?: boolean    → adds --stat (summary instead of full hunks)
+//   maxBytes?: number → truncate the output (default 64 KB)
+function toolGetGitDiff(args) {
+  var workspace = nova.workspace.path;
+  if (!workspace) {
+    return Promise.resolve({ error: "No workspace open" });
+  }
+  var gitArgs = ["diff"];
+  if (args && args.stat) gitArgs.push("--stat");
+  if (args && args.staged) gitArgs.push("--cached");
+  if (args && typeof args.range === "string" && args.range.trim()) {
+    gitArgs.push(args.range.trim());
+  }
+  var maxBytes = (args && Number.isInteger(args.maxBytes)) ? args.maxBytes : 64 * 1024;
+
+  return new Promise(function(resolve) {
+    var proc;
+    try {
+      proc = new Process("/usr/bin/env", {
+        args: ["git", "-C", workspace].concat(gitArgs),
+        stdio: "pipe",
+      });
+    } catch (err) {
+      resolve({ error: "git spawn failed: " + err.message });
+      return;
+    }
+    var out = "";
+    var err = "";
+    proc.onStdout(function(chunk) { if (out.length < maxBytes) out += chunk; });
+    proc.onStderr(function(chunk) { err += chunk; });
+    proc.onDidExit(function(code) {
+      if (code !== 0 && !out) {
+        resolve({ error: "git exit " + code + ": " + err.trim() });
+        return;
+      }
+      var truncated = out.length >= maxBytes;
+      resolve({
+        command: ["git"].concat(gitArgs).join(" "),
+        cwd: workspace,
+        diff: truncated ? out.slice(0, maxBytes) : out,
+        truncated: truncated,
+        empty: out.trim().length === 0,
+      });
+    });
+    try { proc.start(); }
+    catch (e) { resolve({ error: "git start failed: " + e.message }); }
+  });
 }
 
 // --- closeAllDiffTabs ---
