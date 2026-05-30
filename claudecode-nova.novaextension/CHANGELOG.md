@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.19.1 — 2026-05-30
+
+### Fixed — two v0.19.0 audit follow-ups
+
+- **Message spacing doubled** — the per-message Copy-on-hover added a
+  16 px `margin-bottom` on top of the chat container's existing 12 px
+  `gap`, producing 28 px between messages (too loose). Removed the
+  margin; action buttons now sit absolutely in the existing gap with
+  `bottom: -16 px`, and the chat container's 20 px bottom padding
+  catches the last message's overflow so it isn't clipped.
+- **`DAILY_KEY` frozen at module load** — the cost-tracking daily
+  bucket key was computed once when chat.js was parsed. A chat window
+  left open past midnight kept incrementing yesterday's bucket
+  instead of starting the new day. Now resolved fresh on every read /
+  write via `dailyKey()`.
+
 ## 0.19.0 — 2026-05-30
 
 ### UI overhaul — chat styling, cost tracking, multimodal, sidebar
