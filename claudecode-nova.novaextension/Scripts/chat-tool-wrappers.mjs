@@ -167,6 +167,19 @@ export function buildNovaToolsServer({ callNovaTool, log }) {
         maxBytes: z.number().int().optional().describe("Cap output size (default 65536)"),
       },
     ),
+
+    // ── Workspace search (drives /search, /find) ─────────────────
+    wrap(
+      "workspaceSearch",
+      "Recursive grep across the workspace, skipping .git/node_modules/dist/etc. Use this to locate code by literal text (/search) or by symbol-definition regex (/find). Returns `{file, line, text}` records.",
+      {
+        query:    z.string().describe("Text or regex to search for"),
+        regex:    z.boolean().optional().describe("true = extended regex (-E), false = fixed string (-F, default)"),
+        glob:     z.string().optional().describe("File include pattern, e.g. *.ts or *.{js,ts}"),
+        maxHits:  z.number().int().optional().describe("Stop after N matches (default 200)"),
+        maxBytes: z.number().int().optional().describe("Cap stdout (default 262144)"),
+      },
+    ),
   ];
 
   return {

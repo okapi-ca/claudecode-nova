@@ -792,6 +792,9 @@ async function handleToolCall(msg) {
       case "getGitLog":
         result = await toolGetGitLog(args);
         break;
+      case "workspaceSearch":
+        result = await toolWorkspaceSearch(args);
+        break;
       default:
         result = { error: "Unknown tool: " + tool };
     }
@@ -1188,6 +1191,93 @@ function toolGetGitDiff(args) {
     });
     try { proc.start(); }
     catch (e) { resolve({ error: "git start failed: " + e.message }); }
+  });
+}
+
+// --- workspaceSearch ---
+//
+// Recursive grep across the workspace. Used by /search (literal
+// text) and /find (regex tuned for symbol definitions). Returns up
+// to `maxHits` matches as `{file, line, text}` records.
+//
+// Backed by /usr/bin/grep (universally available) rather than ripgrep
+// because Nova's subprocess doesn't see the user's shell PATH.
+//
+// args:
+//   query: string         — text or regex to search for (required)
+//   regex?: boolean       — true = -E (extended regex), false = -F (fixed string)
+//   glob?: string         — file include pattern, e.g. "*.ts" or "*.{js,ts}"
+//   maxHits?: number      — stop after N matches (default 200)
+//   maxBytes?: number     — cap stdout (default 256 KB)
+function toolWorkspaceSearch(args) {
+  var workspace = nova.workspace.path;
+  if (!workspace) return Promise.resolve({ error: "No workspace open" });
+  if (!args || typeof args.query !== "string" || !args.query) {
+    return Promise.resolve({ error: "query is required" });
+  }
+  var maxHits = (args && Number.isInteger(args.maxHits)) ? args.maxHits : 200;
+  var maxBytes = (args && Number.isInteger(args.maxBytes)) ? args.maxBytes : 256 * 1024;
+
+  // grep flags:
+  //   -r recursive   -I skip binaries   -n show line numbers
+  //   -H always print filename   --color=never (avoid ANSI escapes)
+  //   --exclude-dir to skip the usual heavy directories
+  var grepArgs = [
+    "-rInH", "--color=never",
+    "--exclude-dir=.git",
+    "--exclude-dir=node_modules",
+    "--exclude-dir=.next",
+    "--exclude-dir=dist",
+    "--exclude-dir=build",
+    "--exclude-dir=.venv",
+    "--exclude-dir=__pycache__",
+    "-m", String(maxHits),
+  ];
+  if (args.glob && typeof args.glob === "string") {
+    grepArgs.push("--include=" + args.glob);
+  }
+  grepArgs.push(args.regex ? "-E" : "-F");
+  grepArgs.push("--", args.query, workspace);
+
+  return new Promise(function(resolve) {
+    var proc;
+    try {
+      proc = new Process("/usr/bin/grep", { args: grepArgs, stdio: "pipe" });
+    } catch (err) {
+      resolve({ error: "grep spawn failed: " + err.message });
+      return;
+    }
+    var out = "";
+    proc.onStdout(function(chunk) { if (out.length < maxBytes) out += chunk; });
+    proc.onStderr(function() {});
+    proc.onDidExit(function(code) {
+      // grep exits 1 when no match — that's a normal "empty" result.
+      // Exit 2+ means an actual error (bad regex, etc.).
+      if (code > 1) { resolve({ error: "grep exit " + code }); return; }
+      var hits = [];
+      var lines = out.split("\n");
+      for (var i = 0; i < lines.length && hits.length < maxHits; i++) {
+        var line = lines[i];
+        if (!line) continue;
+        // Format: "<filepath>:<lineno>:<text>"
+        var m = line.match(/^(.*?):(\d+):(.*)$/);
+        if (!m) continue;
+        hits.push({
+          file: m[1].replace(workspace + "/", ""),
+          line: parseInt(m[2], 10),
+          text: m[3],
+        });
+      }
+      resolve({
+        command: ["grep"].concat(grepArgs).join(" "),
+        cwd: workspace,
+        hits: hits,
+        truncated: out.length >= maxBytes || hits.length >= maxHits,
+        empty: hits.length === 0,
+      });
+    });
+    try { proc.start(); }
+    catch (e) { resolve({ error: "grep start failed: " + e.message }); }
   });
 }
 

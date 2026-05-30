@@ -44,9 +44,13 @@ const SLASH_COMMANDS = [
   { cmd: "test",     label: "/test",     desc: "Write tests" },
   { cmd: "doc",      label: "/doc",      desc: "Add inline documentation" },
   { cmd: "fix",      label: "/fix",      desc: "Find and fix bugs" },
-  { cmd: "commit",    label: "/commit",    desc: "Draft a commit message from current diff" },
-  { cmd: "changelog", label: "/changelog", desc: "Generate next CHANGELOG entry from commits" },
-  { cmd: "pr",        label: "/pr",        desc: "Draft a PR description (summary + changes + test plan)" },
+  { cmd: "commit",       label: "/commit",       desc: "Draft a commit message from current diff" },
+  { cmd: "changelog",    label: "/changelog",    desc: "Generate next CHANGELOG entry from commits" },
+  { cmd: "pr",           label: "/pr",           desc: "Draft a PR description (summary + changes + test plan)" },
+  { cmd: "explain-error",label: "/explain-error",desc: "Diagnose a stack trace or error message" },
+  { cmd: "why",          label: "/why",          desc: "Explain WHY the selected code exists (intent / constraints)" },
+  { cmd: "search",       label: "/search",       desc: "Recursive grep across the workspace" },
+  { cmd: "find",         label: "/find",         desc: "Locate a symbol definition" },
 ];
 
 // When the user picks a slash command, we send it as a flag and clear
