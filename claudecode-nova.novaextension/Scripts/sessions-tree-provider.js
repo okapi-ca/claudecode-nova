@@ -78,13 +78,17 @@ class SessionsTreeProvider {
     const label = element.preview || "(empty session)";
     const item = new TreeItem(label);
     item.identifier = element.sessionId;
-    item.descriptiveText = relativeTime(element.mtimeMs);
+    // Surface the branch inline next to the time — disambiguates sessions
+    // when the user has many on the same workspace across feature branches.
+    item.descriptiveText = element.gitBranch
+      ? element.gitBranch + "  ·  " + relativeTime(element.mtimeMs)
+      : relativeTime(element.mtimeMs);
 
     const tooltipLines = [];
     tooltipLines.push("Session: " + element.sessionId);
     if (element.gitBranch) tooltipLines.push("Branch: " + element.gitBranch);
     tooltipLines.push("Last activity: " + new Date(element.mtimeMs).toLocaleString());
-    tooltipLines.push("Click to copy `claude --resume <id>` to the clipboard.");
+    tooltipLines.push("Click to choose where to resume (chat / CLI panel / terminal / clipboard).");
     item.tooltip = tooltipLines.join("\n");
 
     item.image = "__builtin.path.action";

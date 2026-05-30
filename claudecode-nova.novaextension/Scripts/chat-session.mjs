@@ -488,6 +488,15 @@ export async function init(opts) {
         injectContext: msg.injectContext === true,
       });
 
+      // Multimodal — image attachments. SDK mode only; CLI rejects them
+      // because `claude -p` doesn't take inline image content.
+      const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+      if (attachments.length > 0 && chatMode === "cli") {
+        send({ type: "error", message: "Image attachments require SDK mode (configure an Anthropic API key). The Claude Code CLI does not accept inline images." });
+        currentAbortController = null;
+        return;
+      }
+
       // CLI mode: spawn `claude -p ...`, parse stream-json, map events.
       // Reuses the user's OAuth Pro/Max session, no API key needed.
       if (chatMode === "cli") {
@@ -513,9 +522,30 @@ export async function init(opts) {
         return;
       }
 
+      // Build the SDK prompt. Plain string when there are no attachments;
+      // otherwise an async iterable of user messages with image + text
+      // content blocks (claude-agent-sdk accepts either form).
+      let sdkPrompt;
+      if (attachments.length > 0) {
+        sdkPrompt = (async function*() {
+          yield {
+            role: "user",
+            content: [
+              ...attachments.map((a) => ({
+                type: "image",
+                source: { type: "base64", media_type: a.mediaType || "image/png", data: a.data },
+              })),
+              { type: "text", text: prompt },
+            ],
+          };
+        })();
+      } else {
+        sdkPrompt = prompt;
+      }
+
       try {
         const q = query({
-          prompt,
+          prompt: sdkPrompt,
           options: {
             model,
             tools: [],

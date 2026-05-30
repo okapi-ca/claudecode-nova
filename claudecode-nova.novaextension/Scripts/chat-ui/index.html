@@ -76,13 +76,17 @@
             <span>Auto-inject context</span>
           </label>
         </div>
+        <div id="attachments" class="attachments" hidden></div>
         <div class="composer__row">
           <div class="composer__input-wrap">
             <div id="slash-menu" class="slash-menu" hidden></div>
             <div id="resume-menu" class="resume-menu" hidden></div>
+            <div id="drop-overlay" class="drop-overlay" hidden>
+              <div class="drop-overlay__msg">Drop images here</div>
+            </div>
             <textarea
               id="input"
-              placeholder="Ask Claude… (type / for slash commands · Enter to send · Shift+Enter for newline)"
+              placeholder="Ask Claude… (type / for commands · drop or paste images · Enter to send)"
               rows="2"
               autofocus
             ></textarea>

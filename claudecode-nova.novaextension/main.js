@@ -2189,7 +2189,12 @@ class PendingDiffsDataProvider {
       var d = element.data;
       var item = new TreeItem(nova.path.basename(d.filePath));
       item.identifier = d.id;
-      item.descriptiveText = relativeTime(d.openedAt);
+      // Show diff size inline so the user can triage at-a-glance — a
+      // 1-line tweak looks very different from an 80-line rewrite. Falls
+      // back to just time when stats aren't computed yet.
+      item.descriptiveText = d.stats
+        ? formatStats(d.stats) + "  ·  " + relativeTime(d.openedAt)
+        : relativeTime(d.openedAt);
       item.tooltip = buildDiffTooltip(d);
       item.collapsibleState = TreeItemCollapsibleState.Expanded;
       item.command = "claudecode.diffShowDetails";

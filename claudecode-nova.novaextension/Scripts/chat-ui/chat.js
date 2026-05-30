@@ -29,6 +29,173 @@ let currentThinkingBody = null;
 let currentThinkingBuffer = "";
 let currentPendingEl = null; // pre-content "Claude is thinking…" placeholder
 
+// ── cost / token accumulation ─────────────────────────────────────
+//
+// `last` is whatever the backend just reported (per-message cost).
+// `session` accumulates from chat-app boot or /clear.
+// `daily` is persisted to localStorage keyed by ISO date — survives
+// page reloads, resets at midnight local time.
+let sessionCost   = 0;
+let sessionInTk   = 0;
+let sessionOutTk  = 0;
+let currentSessionId = null;  // backend session id; changes reset session counters
+const DAILY_KEY = "claudecode_cost_" + new Date().toISOString().slice(0, 10);
+
+function loadDailyCost() {
+  try {
+    const raw = localStorage.getItem(DAILY_KEY);
+    if (!raw) return { cost: 0, inTk: 0, outTk: 0 };
+    return JSON.parse(raw);
+  } catch (e) {
+    return { cost: 0, inTk: 0, outTk: 0 };
+  }
+}
+
+function saveDailyCost(daily) {
+  try { localStorage.setItem(DAILY_KEY, JSON.stringify(daily)); }
+  catch (e) { /* localStorage full or unavailable — silent */ }
+}
+
+function accumulateCost(cost, tokens) {
+  if (typeof cost === "number") {
+    sessionCost += cost;
+    const d = loadDailyCost();
+    d.cost = (d.cost || 0) + cost;
+    if (tokens && typeof tokens.input === "number")  { sessionInTk  += tokens.input;  d.inTk  = (d.inTk  || 0) + tokens.input; }
+    if (tokens && typeof tokens.output === "number") { sessionOutTk += tokens.output; d.outTk = (d.outTk || 0) + tokens.output; }
+    saveDailyCost(d);
+  }
+  renderCostMeta(cost, tokens);
+}
+
+function formatTokens(n) {
+  if (n == null) return "?";
+  if (n < 1000) return String(n);
+  if (n < 10000) return (n / 1000).toFixed(1) + "k";
+  return Math.round(n / 1000) + "k";
+}
+
+function renderCostMeta(lastCost, lastTokens) {
+  const d = loadDailyCost();
+  const parts = [];
+  if (typeof lastCost === "number") {
+    parts.push(`last $${lastCost.toFixed(4)}`);
+  }
+  if (sessionCost > 0) parts.push(`session $${sessionCost.toFixed(4)}`);
+  if (d.cost > 0)      parts.push(`today $${d.cost.toFixed(4)}`);
+  metaCost.textContent = parts.join(" · ");
+  // Detailed token breakdown in tooltip so the meta bar stays compact.
+  const tooltip = [
+    lastTokens ? `Last: ${formatTokens(lastTokens.input)} in / ${formatTokens(lastTokens.output)} out` : null,
+    sessionInTk + sessionOutTk > 0 ? `Session: ${formatTokens(sessionInTk)} in / ${formatTokens(sessionOutTk)} out` : null,
+    (d.inTk || 0) + (d.outTk || 0) > 0 ? `Today: ${formatTokens(d.inTk)} in / ${formatTokens(d.outTk)} out` : null,
+  ].filter(Boolean).join("\n");
+  metaCost.title = tooltip || "No cost data yet";
+}
+
+function resetSessionCost() {
+  sessionCost = 0;
+  sessionInTk = 0;
+  sessionOutTk = 0;
+  renderCostMeta(null, null);
+}
+
+// ── multimodal: image attachments ────────────────────────────────
+//
+// Anthropic accepts PNG / JPEG / GIF / WebP up to ~5 MB each. We hold
+// pending images in `pendingAttachments` until the next user_message
+// sends them, then clear. Images can come from three sources :
+//   - drag-and-drop onto the input wrap
+//   - Cmd+V paste (clipboard event with `kind: "file"`)
+//   - (future) file picker button — not wired yet, keeping the surface small
+const SUPPORTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // Anthropic API hard limit
+let pendingAttachments = [];
+
+function isMultimodalAllowed() {
+  // CLI mode doesn't support images. SDK is the gate.
+  return chatStatus && chatStatus.mode === "sdk";
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result; // "data:image/png;base64,xxx"
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addAttachmentFromFile(file) {
+  if (!file || !SUPPORTED_IMAGE_TYPES.includes(file.type)) return;
+  const tooLarge = file.size > MAX_IMAGE_BYTES;
+  const dataUrl = URL.createObjectURL(file);
+  let data = null;
+  try {
+    data = await fileToBase64(file);
+  } catch (err) {
+    console.warn("attachment encode failed:", err);
+    return;
+  }
+  pendingAttachments.push({
+    id: "att-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+    name: file.name || "image",
+    mediaType: file.type,
+    bytes: file.size,
+    data, // base64 (no data: prefix)
+    dataUrl, // for thumbnail rendering
+    tooLarge,
+  });
+  renderAttachments();
+}
+
+function removeAttachment(id) {
+  const i = pendingAttachments.findIndex((a) => a.id === id);
+  if (i < 0) return;
+  const a = pendingAttachments[i];
+  if (a.dataUrl) URL.revokeObjectURL(a.dataUrl);
+  pendingAttachments.splice(i, 1);
+  renderAttachments();
+}
+
+function clearAttachments() {
+  for (const a of pendingAttachments) {
+    if (a.dataUrl) URL.revokeObjectURL(a.dataUrl);
+  }
+  pendingAttachments = [];
+  renderAttachments();
+}
+
+function renderAttachments() {
+  const wrap = $("attachments");
+  if (!wrap) return;
+  if (pendingAttachments.length === 0) {
+    wrap.hidden = true;
+    wrap.innerHTML = "";
+    return;
+  }
+  wrap.hidden = false;
+  wrap.innerHTML = pendingAttachments
+    .map((a) => `
+      <div class="attachment" data-id="${a.id}" title="${escapeHtml(a.name)} · ${Math.round(a.bytes / 1024)} KB">
+        <img src="${a.dataUrl}" alt="${escapeHtml(a.name)}">
+        ${a.tooLarge ? `<div class="attachment__too-large">> 5 MB — skipped</div>` : ""}
+        <button class="attachment__remove" data-remove="${a.id}" title="Remove">×</button>
+      </div>
+    `)
+    .join("");
+  wrap.querySelectorAll("[data-remove]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeAttachment(btn.getAttribute("data-remove"));
+    });
+  });
+}
+
 // Slash commands available from the composer. The `cmd` value is sent
 // to the backend, which maps it to a templated prompt. The `desc` is
 // only used for the menu label.
@@ -97,8 +264,28 @@ function highlightCodeBlocks(rootEl) {
     if (block.dataset.highlighted) return;
     hljs.highlightElement(block);
     block.dataset.highlighted = "true";
-    addCopyButton(block.parentElement); // the <pre>
+    const preEl = block.parentElement;
+    addLanguageLabel(preEl, block);
+    addCopyButton(preEl);
   });
+}
+
+// Extract the syntax label from the highlight.js classes hljs leaves on the
+// <code> element. After highlightElement, the language is in a class like
+// "language-typescript" or as a bare "typescript" token next to "hljs".
+function addLanguageLabel(preEl, codeEl) {
+  if (preEl.querySelector(".code-lang")) return;
+  let lang = null;
+  for (const cls of codeEl.classList) {
+    if (cls === "hljs") continue;
+    if (cls.startsWith("language-")) { lang = cls.slice(9); break; }
+    if (!cls.includes("-")) { lang = cls; break; }
+  }
+  if (!lang || lang === "plaintext" || lang === "undefined") return;
+  const label = document.createElement("span");
+  label.className = "code-lang";
+  label.textContent = lang;
+  preEl.appendChild(label);
 }
 
 function addCopyButton(preEl) {
@@ -124,6 +311,30 @@ function addCopyButton(preEl) {
   preEl.appendChild(btn);
 }
 
+// Adds a hover-revealed action row to a message wrapper. Reads text fresh
+// from the body so streaming assistant messages copy their current state.
+function addMessageActions(wrap) {
+  if (wrap.querySelector(".msg__actions")) return;
+  const actions = document.createElement("div");
+  actions.className = "msg__actions";
+  actions.innerHTML = `<button class="msg__action" title="Copy message">Copy</button>`;
+  const btn = actions.querySelector(".msg__action");
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const body = wrap.querySelector(".msg__body");
+    const txt = body ? body.innerText : "";
+    try {
+      await navigator.clipboard.writeText(txt);
+      btn.textContent = "Copied!";
+      btn.classList.add("copied");
+      setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1500);
+    } catch (err) {
+      btn.textContent = "Error";
+    }
+  });
+  wrap.appendChild(actions);
+}
+
 // ── DOM helpers for message bubbles ───────────────────────────────
 
 function hideEmptyState() {
@@ -140,6 +351,7 @@ function appendUserMessage(text) {
   `;
   wrap.querySelector(".msg__body").textContent = text;
   chatEl.appendChild(wrap);
+  addMessageActions(wrap);
   scrollToBottom();
 }
 
@@ -155,6 +367,7 @@ function ensureAssistantBubble() {
   chatEl.appendChild(wrap);
   currentAssistantBubble = wrap.querySelector(".msg__body");
   currentAssistantBuffer = "";
+  addMessageActions(wrap);
   return currentAssistantBubble;
 }
 
@@ -381,6 +594,7 @@ function appendHistoryMessage(role, text) {
     highlightCodeBlocks(body);
   }
   chatEl.appendChild(wrap);
+  addMessageActions(wrap);
   scrollToBottom();
 }
 
@@ -521,6 +735,13 @@ function handleServerMessage(msg) {
 
     case "session_started":
       metaSess.textContent = `session ${msg.sessionId.slice(0, 8)}…`;
+      // Reset session cost when the backend starts a fresh session
+      // (different ID than what we last saw). Resume/replay keep the
+      // same ID and therefore the same running totals.
+      if (currentSessionId && currentSessionId !== msg.sessionId) {
+        resetSessionCost();
+      }
+      currentSessionId = msg.sessionId;
       applyModeBadge(msg.mode);
       // Sync the picker to the model the backend actually started with —
       // it may differ from the picker's default if the user configured
@@ -563,10 +784,7 @@ function handleServerMessage(msg) {
       removePendingPlaceholder();
       if (currentThinkingBody) collapseCurrentThinking();
       if (msg.success && msg.cost != null) {
-        const tk = msg.tokens
-          ? ` · in ${msg.tokens.input} / out ${msg.tokens.output} tk`
-          : "";
-        metaCost.textContent = `last cost $${msg.cost.toFixed(4)}${tk}`;
+        accumulateCost(msg.cost, msg.tokens);
       } else if (!msg.success) {
         appendErrorMessage(msg.error || "query failed");
       }
@@ -600,8 +818,9 @@ function setStatus(kind, text) {
 
 function sendUserMessage() {
   const text = inputEl.value.trim();
-  // A slash command can be sent without extra text; otherwise require text.
-  if ((!text && !pendingSlashCommand) || inFlight || !ws || ws.readyState !== WebSocket.OPEN) return;
+  // A slash command, attachment-only, or any text is enough to send.
+  const hasAttachments = pendingAttachments.some((a) => !a.tooLarge);
+  if ((!text && !pendingSlashCommand && !hasAttachments) || inFlight || !ws || ws.readyState !== WebSocket.OPEN) return;
   inFlight = true;
 
   const injectContext = !!(injectCtxEl && injectCtxEl.checked);
@@ -609,21 +828,32 @@ function sendUserMessage() {
 
   // Visual representation: prepend the slash label so the user sees
   // which command was used in the transcript.
-  const displayText = slashCommand
+  const attachmentsLabel = hasAttachments
+    ? ` [${pendingAttachments.filter((a) => !a.tooLarge).length} image${pendingAttachments.length > 1 ? "s" : ""}]`
+    : "";
+  const displayText = (slashCommand
     ? `/${slashCommand}${text ? " " + text : ""}`
-    : text;
+    : (text || "(image only)")) + attachmentsLabel;
   appendUserMessage(displayText);
+
+  // Build the attachments payload — drop too-large ones, strip dataUrl
+  // (frontend-only) but keep base64 data + mediaType for the backend.
+  const attachments = pendingAttachments
+    .filter((a) => !a.tooLarge)
+    .map((a) => ({ data: a.data, mediaType: a.mediaType, name: a.name }));
 
   ws.send(JSON.stringify({
     type: "user_message",
     text,
     slashCommand,
     injectContext,
+    ...(attachments.length > 0 ? { attachments } : {}),
   }));
 
   inputEl.value = "";
   pendingSlashCommand = null;
   hideSlashMenu();
+  clearAttachments();
   sendBtn.disabled = true;
   abortBtn.hidden = false;
   setStatus("thinking", "Sending…");
@@ -710,7 +940,8 @@ function runClearCommand() {
   historyToolCards.length = 0;
   // Reset the meta bar info that ties to a specific session.
   if (metaSess) metaSess.textContent = "";
-  if (metaCost) metaCost.textContent = "";
+  currentSessionId = null;
+  resetSessionCost();
 
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "reset_session" }));
@@ -779,6 +1010,71 @@ document.querySelectorAll(".suggestion").forEach((btn) => {
     inputEl.value = btn.dataset.prompt;
     sendUserMessage();
   });
+});
+
+// ── multimodal: drag-drop + paste image attachments ──────────────
+// The drop zone is the input wrap; the overlay is shown when any drag
+// enters the page and hidden on leave or drop. We use a counter to
+// handle nested elements correctly (dragenter fires for children).
+const inputWrap = document.querySelector(".composer__input-wrap");
+const dropOverlay = $("drop-overlay");
+let dragCounter = 0;
+
+if (inputWrap && dropOverlay) {
+  const showOverlay = () => {
+    if (!isMultimodalAllowed()) return;
+    dropOverlay.hidden = false;
+  };
+  const hideOverlay = () => { dropOverlay.hidden = true; };
+
+  // Listen on the whole composer so the overlay catches drags before
+  // they reach the textarea.
+  document.addEventListener("dragenter", (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return;
+    dragCounter++;
+    showOverlay();
+  });
+  document.addEventListener("dragleave", () => {
+    dragCounter = Math.max(0, dragCounter - 1);
+    if (dragCounter === 0) hideOverlay();
+  });
+  document.addEventListener("dragover", (e) => {
+    // Required for drop to fire.
+    if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+      e.preventDefault();
+    }
+  });
+  document.addEventListener("drop", async (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+    e.preventDefault();
+    dragCounter = 0;
+    hideOverlay();
+    if (!isMultimodalAllowed()) {
+      appendErrorMessage("Image attachments require SDK mode (set an Anthropic API key in Nova settings).");
+      return;
+    }
+    for (const f of Array.from(e.dataTransfer.files)) {
+      await addAttachmentFromFile(f);
+    }
+  });
+}
+
+// Paste handler — clipboard images (Cmd+V on a screenshot copied via
+// Shift+Ctrl+Cmd+4, or images copied from a browser).
+inputEl.addEventListener("paste", async (e) => {
+  if (!e.clipboardData) return;
+  const items = Array.from(e.clipboardData.items || []);
+  const imgs = items.filter((it) => it.kind === "file" && it.type.startsWith("image/"));
+  if (imgs.length === 0) return;
+  if (!isMultimodalAllowed()) {
+    appendErrorMessage("Image attachments require SDK mode (set an Anthropic API key in Nova settings).");
+    return;
+  }
+  e.preventDefault();
+  for (const it of imgs) {
+    const f = it.getAsFile();
+    if (f) await addAttachmentFromFile(f);
+  }
 });
 
 // ── embedded terminal (xterm.js → /cli WS → node-pty `claude`) ─────
@@ -1153,6 +1449,10 @@ function applyModeBadge(mode) {
 // ── boot ──────────────────────────────────────────────────────────
 
 window.addEventListener("load", () => {
+  // Surface the persisted daily total right away so the user sees their
+  // running cost from previous sessions today, even before sending the
+  // first message.
+  renderCostMeta(null, null);
   // Wait for marked + hljs to be available
   const tryStart = () => {
     if (setupMarked() && typeof hljs !== "undefined") {
