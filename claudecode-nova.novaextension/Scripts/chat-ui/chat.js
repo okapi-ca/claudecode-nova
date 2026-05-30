@@ -54,6 +54,9 @@ const SLASH_COMMANDS = [
   { cmd: "plan",         label: "/plan",         desc: "Plan steps before acting; wait for OK" },
   { cmd: "recap",        label: "/recap",        desc: "Summarize the current conversation" },
   { cmd: "clear",        label: "/clear",        desc: "Wipe the chat and start a fresh session" },
+  { cmd: "spec",         label: "/spec",         desc: "Turn the conversation into a formal spec" },
+  { cmd: "readme",       label: "/readme",       desc: "Generate (or rewrite) a project README" },
+  { cmd: "api-doc",      label: "/api-doc",      desc: "API reference for the selected exports" },
 ];
 
 // When the user picks a slash command, we send it as a flag and clear
