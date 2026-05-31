@@ -1058,7 +1058,7 @@ body {
 .terminal__host {
   flex: 1;
   min-height: 0;
-  padding: 10px 10px;  /* light, equal top/bottom breathing room */
+  padding: 10px 10px 18px;  /* extra breathing room below the PTY */
   background: #0d0d0f;
   overflow: hidden;
 }
