@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.22.0 — 2026-05-31
+
+### Added — chat UX
+
+- **Edit & resend** — ArrowUp on an empty composer recalls your last
+  prompt to edit and resend.
+- **Context gauge** — a round (donut) ring shows how full the context
+  window is (last turn's input_tokens vs the model's max: 1M for the
+  Opus 4.8 "1M" variant, else 200k). Tints amber ≥60%, red ≥85%; the
+  exact figures are in the tooltip. **Click the ring to compact** the
+  conversation.
+- **Keyboard shortcuts** — `Cmd/Ctrl+K` focuses the composer; `Esc`
+  aborts the in-flight query.
+- **Tokens in clear** — the cost line shows the last turn's in/out
+  tokens and the cumulative session total, not just a tooltip.
+- **Clickable session id** — click it to copy the full id (shown in the
+  tooltip).
+
+### Changed — composer & visual design
+
+- **Floating-card look** — the chat and CLI panels now sit as rounded,
+  bordered, shadowed cards on a darker "desk" background, so each stands
+  out (chat lighter, terminal darker). Assistant bubbles bumped to read
+  as raised on the card.
+- Composer reorganised: model picker + auth badge on the left; a
+  centered bottom line below the input carries session (left) · cost +
+  tokens (center) · context ring + Auto-inject toggle (right).
+- Slimmer single-row input + smaller Send/Stop; lighter, harmonised
+  buttons across chat and CLI panels.
+- Removed the message area's top/bottom padding and a phantom empty bar
+  under the composer.
+
 ## 0.21.1 — 2026-05-31
 
 ### Changed — "Remote" button is now "Live sessions"
