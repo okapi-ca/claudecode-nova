@@ -1131,6 +1131,11 @@ body {
 
 .chat-panel > .composer {
   flex-shrink: 0;
+  /* Align with the results panel: same side + bottom insets, matching
+     border + radius. Top gap comes from the results panel's margin. */
+  margin: 0 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
 
 /* Visual separators for the header and (per-panel) composer */
