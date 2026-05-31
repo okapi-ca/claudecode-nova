@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.22.5 — 2026-05-31
+
+### Added
+
+- **"Live" button in the CLI panel** — the terminal header now has its
+  own ⇄ Live button (beside Resume/Restart) that lists running local
+  claude sessions and attaches the picked one in the terminal. The
+  chat's Live button resumes in the chat; the CLI panel's attaches in
+  the terminal.
+
+### Fixed
+
+- **Stale chat-ui assets** — the chat HTTP server now serves with
+  `no-store` so WebKit (Nova Preview) always fetches fresh JS/CSS after
+  an update, instead of holding a cached ES module.
+
 ## 0.22.4 — 2026-05-31
 
 ### Fixed
