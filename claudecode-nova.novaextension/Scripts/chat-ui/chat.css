@@ -474,9 +474,9 @@ body {
 }
 .meta-btn:hover { color: var(--text); border-color: var(--accent); }
 /* The first item of the right-aligned group absorbs the slack, so
-   Resume + Remote + the toggle group cleanly at the right with the
+   Remote + Resume + the toggle group cleanly at the right with the
    toggle ending far right. */
-#resume { margin-left: auto; }
+#remote-control { margin-left: auto; }
 
 /* ── scrollbar ──────────────────────────────────────────────────── */
 
