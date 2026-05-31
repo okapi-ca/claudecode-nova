@@ -473,16 +473,20 @@ body {
   transition: color 0.15s, border-color 0.15s;
 }
 .meta-btn:hover { color: var(--text); border-color: var(--accent); }
-/* Three-zone meta bar: model + auth on the left, cost/ctx centered,
-   action buttons on the right. The centered group's auto margins on both
-   sides push it to the middle and shove the action group to the far
-   right (so #export-md no longer needs its own margin-left:auto). */
-.meta-center {
-  display: inline-flex;
+/* Action buttons (Export/Live/Resume/Auto-inject) right-align in the
+   meta bar; the first one absorbs the slack. */
+#export-md { margin-left: auto; }
+
+/* Cost / context line — centered, on its own row below the input. */
+.composer__costline {
+  display: flex;
+  justify-content: center;
   align-items: center;
   gap: 12px;
-  margin-left: auto;
-  margin-right: auto;
+  padding-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  min-height: 14px; /* reserve space so the composer doesn't jump */
 }
 
 /* ── scrollbar ──────────────────────────────────────────────────── */
