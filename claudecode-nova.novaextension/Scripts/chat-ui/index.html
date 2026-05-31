@@ -100,7 +100,10 @@
           </span>
           <span id="meta-ctx" class="ctx-meter" title="Context window — fills after the first reply">
             <span class="ctx-meter__label">ctx</span>
-            <span class="ctx-meter__track"><span class="ctx-meter__fill"></span></span>
+            <svg class="ctx-ring" viewBox="0 0 20 20" width="15" height="15" aria-hidden="true">
+              <circle class="ctx-ring__track" cx="10" cy="10" r="8"></circle>
+              <circle class="ctx-ring__fill" cx="10" cy="10" r="8"></circle>
+            </svg>
           </span>
           <label class="composer__toggle" title="Prepend your current file + selection to every prompt">
             <input type="checkbox" id="inject-context" checked />

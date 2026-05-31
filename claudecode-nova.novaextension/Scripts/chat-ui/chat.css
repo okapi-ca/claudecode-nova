@@ -592,22 +592,25 @@ body {
   font-size: 11px;
   color: var(--text-muted);
 }
-.ctx-meter__track {
-  width: 56px;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--border);
-  overflow: hidden;
+/* Round (donut) gauge: an SVG ring whose arc length tracks context use.
+   r=8 → circumference ≈ 50.27; JS sets stroke-dashoffset accordingly. */
+.ctx-ring { transform: rotate(-90deg); display: block; }
+.ctx-ring__track {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 3;
 }
-.ctx-meter__fill {
-  display: block;
-  height: 100%;
-  width: 0;
-  background: var(--accent);
-  transition: width 0.3s ease, background 0.3s ease;
+.ctx-ring__fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 50.27;
+  stroke-dashoffset: 50.27; /* empty until first reply */
+  transition: stroke-dashoffset 0.3s ease, stroke 0.3s ease;
 }
-.ctx-meter__fill--mid  { background: #d8a657; }
-.ctx-meter__fill--high { background: var(--error); }
+.ctx-ring__fill--mid  { stroke: #d8a657; }
+.ctx-ring__fill--high { stroke: var(--error); }
 
 /* ── attachment thumbnails (multimodal images) ──────────────────── */
 .attachments {

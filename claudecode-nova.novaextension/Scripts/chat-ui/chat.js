@@ -110,15 +110,18 @@ function contextMaxForModel(model) {
   return /opus-4-8/.test(model || "") ? 1000000 : 200000;
 }
 
+const CTX_RING_CIRCUMFERENCE = 2 * Math.PI * 8; // r=8 ≈ 50.27
 function renderContextGauge(inputTokens) {
   const el = document.getElementById("meta-ctx");
   if (!el || typeof inputTokens !== "number") return;
-  const fill = el.querySelector(".ctx-meter__fill");
-  if (!fill) return;
+  const ring = el.querySelector(".ctx-ring__fill");
+  if (!ring) return;
   const max = contextMaxForModel(chatStatus.model || (modelPicker && modelPicker.value));
   const pct = Math.min(100, Math.round((inputTokens / max) * 100));
-  fill.style.width = pct + "%";
-  fill.className = "ctx-meter__fill" + (pct >= 85 ? " ctx-meter__fill--high" : pct >= 60 ? " ctx-meter__fill--mid" : "");
+  // Arc length = pct of the circumference; offset hides the remainder.
+  ring.style.strokeDashoffset = (CTX_RING_CIRCUMFERENCE * (1 - pct / 100)).toFixed(2);
+  // SVG className is an SVGAnimatedString — must set via attribute.
+  ring.setAttribute("class", "ctx-ring__fill" + (pct >= 85 ? " ctx-ring__fill--high" : pct >= 60 ? " ctx-ring__fill--mid" : ""));
   el.title = `Context: ${formatTokens(inputTokens)} / ${formatTokens(max)} (${pct}%) used last turn`;
 }
 
