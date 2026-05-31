@@ -57,14 +57,6 @@
 
       <footer class="composer">
         <div class="composer__meta" id="meta">
-          <span class="composer__status" id="composer-status" title="Claude activity">
-            <span class="dot dot--idle" id="composer-status-dot"></span>
-            <span id="composer-status-text">Ready</span>
-          </span>
-          <span id="meta-mode" class="meta-mode" hidden></span>
-          <span id="meta-session"></span>
-          <span id="meta-cost"></span>
-          <span id="meta-ctx" class="meta-ctx"></span>
           <label class="composer__model" title="Model used for the next message (no restart needed)">
             <span class="composer__model-label">Model</span>
             <select id="model-picker">
@@ -74,6 +66,14 @@
               <option value="claude-opus-4-8">Opus 4.8 (1M)</option>
             </select>
           </label>
+          <span id="meta-mode" class="meta-mode" hidden></span>
+          <span class="composer__status" id="composer-status" title="Claude activity">
+            <span class="dot dot--idle" id="composer-status-dot"></span>
+            <span id="composer-status-text">Ready</span>
+          </span>
+          <span id="meta-session"></span>
+          <span id="meta-cost"></span>
+          <span id="meta-ctx" class="meta-ctx"></span>
           <button id="export-md" class="meta-btn" title="Export this conversation as a Markdown file">⤓ Export</button>
           <button id="remote-control" class="meta-btn" title="List claude sessions running on this machine and jump into one in the CLI panel">⇄ Live</button>
           <button id="resume" class="meta-btn" title="Resume a previous session">⏱ Resume…</button>
