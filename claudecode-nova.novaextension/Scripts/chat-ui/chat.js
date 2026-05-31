@@ -1804,6 +1804,16 @@ window.addEventListener("load", () => {
   // first message.
   renderCostMeta(null, null);
 
+  // Show the context gauge as a discoverable placeholder until the first
+  // reply gives us real input_tokens to compute from.
+  {
+    const ctx = document.getElementById("meta-ctx");
+    if (ctx) {
+      ctx.textContent = "ctx —";
+      ctx.title = "Context-window usage — appears after the first reply";
+    }
+  }
+
   // Restore persisted UI prefs. Model is restored here visually; the
   // backend is re-told on session_started. Inject toggle + layout too.
   const savedModel = uiPrefGet("model");
