@@ -461,7 +461,6 @@ body {
    the far right. Light/compact like the topbar buttons — not the big
    red .btn--secondary it used to inherit. */
 .meta-btn {
-  margin-left: auto; /* push to the far right of the meta bar */
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-muted);
@@ -474,6 +473,10 @@ body {
   transition: color 0.15s, border-color 0.15s;
 }
 .meta-btn:hover { color: var(--text); border-color: var(--accent); }
+/* The first item of the right-aligned group absorbs the slack, so
+   Resume + Remote + the toggle group cleanly at the right with the
+   toggle ending far right. */
+#resume { margin-left: auto; }
 
 /* ── scrollbar ──────────────────────────────────────────────────── */
 

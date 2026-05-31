@@ -61,10 +61,14 @@ export function attach({ httpServer, claudeCommand = "claude", claudeArgs = "", 
     // session. The frontend reconnects with this param after the
     // user picks "CLI panel" in the Nova sidebar action panel.
     let resumeSessionId = null;
+    let remoteControl = false;
     try {
       const u = new URL(req.url || "/", "http://127.0.0.1");
       const sid = u.searchParams.get("session");
       if (sid && /^[a-zA-Z0-9-]+$/.test(sid)) resumeSessionId = sid;
+      // ?remote=1 → spawn with --remote-control so the session can be
+      // driven from claude.ai/code or the Claude mobile app.
+      remoteControl = u.searchParams.get("remote") === "1";
     } catch (_) {}
 
     // If the sidebar fired a resume_external before any CLI client
@@ -96,6 +100,11 @@ export function attach({ httpServer, claudeCommand = "claude", claudeArgs = "", 
     if (resumeSessionId) {
       args.unshift("--resume", resumeSessionId);
       log("info", `cli: resuming session ${resumeSessionId}`);
+    }
+    if (remoteControl) {
+      // --remote-control enables pairing with claude.ai/code + mobile.
+      args.push("--remote-control");
+      log("info", "cli: remote control enabled for this session");
     }
 
     // Nova's subprocess inherits a stripped PATH that typically excludes

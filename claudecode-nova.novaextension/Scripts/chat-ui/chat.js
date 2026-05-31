@@ -1095,6 +1095,10 @@ let termWs = null;
 // Both share the one chat WebSocket, so we tag the request to dispatch
 // the single "sessions" reply to the right place.
 let pendingSessionsFor = null;
+// What the composer's session menu does on pick: "chat" resumes the
+// conversation in-place; "remote" launches the picked session in the
+// CLI panel with --remote-control (drivable from claude.ai/code + mobile).
+let resumeMenuAction = "chat";
 
 // Pick the xterm.js theme object matching the current data-theme
 // attribute on <html>. Re-called whenever the page theme changes.
@@ -1154,12 +1158,15 @@ function ensureTerminal() {
   return termInstance;
 }
 
-function connectTerminalWs(sessionIdToResume) {
+function connectTerminalWs(sessionIdToResume, remoteControl) {
   if (termWs) return;
   // Reconnecting with ?session=<id> tells cli-session to spawn the
-  // PTY with --resume <id>. Used by the Nova sidebar "CLI panel"
-  // action.
-  const qs = sessionIdToResume ? `?session=${encodeURIComponent(sessionIdToResume)}` : "";
+  // PTY with --resume <id>; ?remote=1 adds --remote-control so the
+  // session pairs with claude.ai/code + the mobile app.
+  const params = [];
+  if (sessionIdToResume) params.push(`session=${encodeURIComponent(sessionIdToResume)}`);
+  if (remoteControl) params.push("remote=1");
+  const qs = params.length ? `?${params.join("&")}` : "";
   const url = `ws://${location.host}/cli${qs}`;
   termWs = new WebSocket(url);
   // Capture this socket so handlers can tell whether they belong to the
@@ -1424,7 +1431,11 @@ function showResumeMenu(sessions) {
     resumeMenu.querySelectorAll(".resume-menu__item").forEach((el) => {
       el.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        pickResumeSession(el.dataset.sid, el.querySelector(".resume-menu__preview")?.textContent || "");
+        const sid = el.dataset.sid;
+        const preview = el.querySelector(".resume-menu__preview")?.textContent || "";
+        // Dispatch on which button opened the menu.
+        if (resumeMenuAction === "remote") startRemoteControl(sid, preview);
+        else pickResumeSession(sid, preview);
       });
     });
   }
@@ -1458,24 +1469,43 @@ function relativeTimeShort(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-if (resumeBtn) {
-  resumeBtn.addEventListener("click", () => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    if (resumeMenu && !resumeMenu.hidden) { hideResumeMenu(); return; }
-    pendingSessionsFor = "chat";
-    ws.send(JSON.stringify({ type: "list_sessions" }));
-    // The "sessions" reply will trigger showResumeMenu(). Show a
-    // momentary loading state.
-    if (resumeMenu) {
-      resumeMenu.innerHTML = `<div class="resume-menu__empty">Loading sessions…</div>`;
-      resumeMenu.hidden = false;
-    }
-  });
+// Open the composer session menu for a given action ("chat" = resume
+// the conversation, "remote" = launch in the CLI panel with remote
+// control). Both reuse the same list_sessions request + menu.
+function openSessionMenu(action) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (resumeMenu && !resumeMenu.hidden) { hideResumeMenu(); return; }
+  resumeMenuAction = action;
+  pendingSessionsFor = "chat"; // routes the reply to showResumeMenu()
+  ws.send(JSON.stringify({ type: "list_sessions" }));
+  if (resumeMenu) {
+    resumeMenu.innerHTML = `<div class="resume-menu__empty">Loading sessions…</div>`;
+    resumeMenu.hidden = false;
+  }
 }
+
+if (resumeBtn) resumeBtn.addEventListener("click", () => openSessionMenu("chat"));
+
+// Remote-control: launch a past session in the CLI panel with
+// --remote-control so it can be driven from claude.ai/code + mobile.
+function startRemoteControl(sessionId, preview) {
+  hideResumeMenu();
+  if (panelsEl && termPanel.hidden) setLayout("cli");
+  ensureTerminal();
+  if (termInstance) {
+    termInstance.write(`\r\n\x1b[36m[remote control${sessionId ? " · resuming " + sessionId.slice(0, 8) + "…" : ""}${preview ? " — " + preview : ""}]\x1b[0m\r\n`);
+    try { termInstance.clear(); } catch (_) {}
+  }
+  if (termWs) { try { termWs.close(); } catch (_) {} termWs = null; }
+  connectTerminalWs(sessionId, true);
+}
+
+const remoteBtn = document.getElementById("remote-control");
+if (remoteBtn) remoteBtn.addEventListener("click", () => openSessionMenu("remote"));
 
 // Close the resume menu when clicking outside.
 document.addEventListener("mousedown", (e) => {
-  if (resumeMenu && !resumeMenu.hidden && !resumeMenu.contains(e.target) && e.target !== resumeBtn) {
+  if (resumeMenu && !resumeMenu.hidden && !resumeMenu.contains(e.target) && e.target !== resumeBtn && e.target !== remoteBtn) {
     hideResumeMenu();
   }
 });
