@@ -548,7 +548,6 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
   font-size: 11px;
   color: var(--muted);
   cursor: pointer;
