@@ -1224,7 +1224,7 @@ body {
 
 /* The composer is part of the chat card — transparent so it inherits
    the card surface rather than the desk colour. */
-.chat-panel > .composer { background: transparent; }
+.chat-panel > .composer { background: var(--surface-card); }
 
 /* Status indicator moved from the topbar into the composer meta bar
    so the chat and chat-status info live together at the bottom. */
