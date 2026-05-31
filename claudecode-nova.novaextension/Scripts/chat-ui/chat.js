@@ -93,6 +93,9 @@ function renderCostMeta(lastCost, lastTokens) {
   if (lastTokens && (lastTokens.input != null || lastTokens.output != null)) {
     parts.push(`${formatTokens(lastTokens.input)} in / ${formatTokens(lastTokens.output)} out`);
   }
+  // Cumulative tokens used this session.
+  const totalTk = sessionInTk + sessionOutTk;
+  if (totalTk > 0) parts.push(`${formatTokens(totalTk)} tok used`);
   metaCost.textContent = parts.join(" · ");
   // Tooltip keeps the cumulative session/today token breakdown.
   const tooltip = [
@@ -122,7 +125,7 @@ function renderContextGauge(inputTokens) {
   ring.style.strokeDashoffset = (CTX_RING_CIRCUMFERENCE * (1 - pct / 100)).toFixed(2);
   // SVG className is an SVGAnimatedString — must set via attribute.
   ring.setAttribute("class", "ctx-ring__fill" + (pct >= 85 ? " ctx-ring__fill--high" : pct >= 60 ? " ctx-ring__fill--mid" : ""));
-  el.title = `Context: ${formatTokens(inputTokens)} / ${formatTokens(max)} (${pct}%) used last turn`;
+  el.title = `Context ${pct}% — ${formatTokens(inputTokens)} / ${formatTokens(max)} tokens (last turn) · click to compact`;
 }
 
 function resetSessionCost() {
@@ -1086,6 +1089,22 @@ document.addEventListener("keydown", (e) => {
     abortQuery();
   }
 });
+
+// Clicking the context gauge compacts the conversation (sends /compact
+// through the normal message flow — reuses sendUserMessage).
+function requestCompaction() {
+  if (inFlight || !ws || ws.readyState !== WebSocket.OPEN) return;
+  inputEl.value = "/compact";
+  pendingSlashCommand = null;
+  sendUserMessage();
+}
+const ctxGauge = document.getElementById("meta-ctx");
+if (ctxGauge) {
+  ctxGauge.addEventListener("click", requestCompaction);
+  ctxGauge.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); requestCompaction(); }
+  });
+}
 
 inputEl.addEventListener("input", onInputChange);
 inputEl.addEventListener("keydown", (e) => {

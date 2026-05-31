@@ -587,11 +587,16 @@ body {
    the context window fills up. Exact figures live in the tooltip. */
 .ctx-meter {
   display: inline-flex;
+  flex-direction: column;   /* label sits under the ring */
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: 1px;
+  font-size: 10px;
+  line-height: 1;
   color: var(--text-muted);
+  cursor: pointer;          /* clickable → compaction */
 }
+.ctx-meter:hover { color: var(--text); }
+.ctx-meter:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 /* Round (donut) gauge: an SVG ring whose arc length tracks context use.
    r=8 → circumference ≈ 50.27; JS sets stroke-dashoffset accordingly. */
 .ctx-ring { transform: rotate(-90deg); display: block; }
