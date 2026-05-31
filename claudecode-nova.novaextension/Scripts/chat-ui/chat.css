@@ -1038,7 +1038,7 @@ body {
 }
 .term-action:hover { color: var(--text); border-color: var(--accent); }
 /* First action button absorbs the slack, pushing the group right. */
-#term-resume { margin-left: auto; }
+#term-live { margin-left: auto; }
 
 /* CLI Resume dropdown — drops DOWN from the header into the terminal
    body (the .terminal wrapper has overflow:hidden, so it must open

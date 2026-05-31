@@ -714,7 +714,9 @@ function handleServerMessage(msg) {
       break;
 
     case "live_sessions":
-      showLiveSessionsMenu(msg.sessions || []);
+      if (pendingLiveFor === "cli") showTermLiveMenu(msg.sessions || []);
+      else showLiveSessionsMenu(msg.sessions || []);
+      pendingLiveFor = null;
       break;
 
     case "resume_external":
@@ -1231,6 +1233,9 @@ let termWs = null;
 // Both share the one chat WebSocket, so we tag the request to dispatch
 // the single "sessions" reply to the right place.
 let pendingSessionsFor = null;
+// Which surface requested the next live_sessions reply: "chat" → resume
+// in the chat, "cli" → attach in the terminal panel.
+let pendingLiveFor = null;
 // ── UI preference persistence (localStorage) ──────────────────────
 // Layout, model, auto-inject toggle, and the Both-mode splitter ratio
 // survive reloads. Same lenient try/catch pattern as the cost tracker.
@@ -1552,7 +1557,8 @@ if (termResumeBtn) {
 // Close the CLI resume menu on outside click.
 document.addEventListener("mousedown", (e) => {
   if (termResumeMenu && !termResumeMenu.hidden &&
-      !termResumeMenu.contains(e.target) && e.target !== termResumeBtn) {
+      !termResumeMenu.contains(e.target) && e.target !== termResumeBtn &&
+      e.target !== document.getElementById("term-live")) {
     hideTermResumeMenu();
   }
 });
@@ -1684,6 +1690,7 @@ function showLiveSessionsMenu(sessions) {
 function openLiveSessions() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (resumeMenu && !resumeMenu.hidden) { hideResumeMenu(); return; }
+  pendingLiveFor = "chat"; // reply → resume in the chat
   ws.send(JSON.stringify({ type: "list_live_sessions" }));
   if (resumeMenu) {
     resumeMenu.innerHTML = `<div class="resume-menu__empty">Scanning live sessions…</div>`;
@@ -1692,6 +1699,54 @@ function openLiveSessions() {
 }
 
 if (liveBtn) liveBtn.addEventListener("click", openLiveSessions);
+
+// CLI panel "Live" — same list of running local sessions, but attach the
+// picked one in the terminal (claude --resume) instead of the chat.
+function showTermLiveMenu(sessions) {
+  if (!termResumeMenu) return;
+  if (!sessions || sessions.length === 0) {
+    termResumeMenu.innerHTML = `<div class="resume-menu__empty">No live claude sessions running on this machine.</div>`;
+  } else {
+    termResumeMenu.innerHTML = sessions.map((s) => {
+      const sid = s.sessionId || "";
+      const dir = s.cwd ? s.cwd.split("/").pop() : "?";
+      const status = s.status || "";
+      const started = s.startedAt ? relativeTimeShort(s.startedAt) : "";
+      return `
+      <button class="resume-menu__item" data-sid="${sid}" title="${escapeHtml(s.cwd || sid)}">
+        <span class="resume-menu__preview">${escapeHtml(dir)}${status ? ` · ${escapeHtml(status)}` : ""}</span>
+        <span class="resume-menu__meta">
+          <span class="resume-menu__sid">${escapeHtml(sid)}</span>
+          <span>${escapeHtml(started)}${s.pid ? " · pid " + s.pid : ""}</span>
+        </span>
+      </button>`;
+    }).join("");
+    termResumeMenu.querySelectorAll(".resume-menu__item").forEach((el) => {
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        resumeTerminalSession(el.dataset.sid, el.querySelector(".resume-menu__preview")?.textContent || "");
+      });
+    });
+  }
+  termResumeMenu.hidden = false;
+}
+
+const termLiveBtn = document.getElementById("term-live");
+if (termLiveBtn) {
+  termLiveBtn.addEventListener("click", () => {
+    if (termResumeMenu && !termResumeMenu.hidden) { hideTermResumeMenu(); return; }
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      if (termInstance) termInstance.write("\r\n\x1b[31m[cannot list sessions — chat backend not connected]\x1b[0m\r\n");
+      return;
+    }
+    pendingLiveFor = "cli";
+    ws.send(JSON.stringify({ type: "list_live_sessions" }));
+    if (termResumeMenu) {
+      termResumeMenu.innerHTML = `<div class="resume-menu__empty">Scanning live sessions…</div>`;
+      termResumeMenu.hidden = false;
+    }
+  });
+}
 
 // ── export conversation to Markdown ───────────────────────────────
 // Serializes the visible transcript (user/assistant messages + a
