@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.21.0 — 2026-05-31
+
+### CLI panel — never get stranded
+
+- **Restart button** ("↻ Restart") in the terminal header spawns a
+  fresh `claude` PTY without reloading the page. Quitting `claude` used
+  to leave a dead terminal with no way back (the "switch layout to
+  reconnect" hint didn't actually work); now it does, and the button
+  makes it obvious.
+- **Resume button** ("⏱ Resume") in the terminal header lists the
+  workspace's past sessions and relaunches the terminal with
+  `claude --resume <id>`.
+- **Remote Control button** ("⇄ Remote") in the composer meta bar lists
+  past sessions and launches the picked one in the CLI panel with
+  `--remote-control`, so it can be driven from claude.ai/code or the
+  Claude mobile app.
+
+### Chat UX
+
+- **Respectful auto-scroll** — streaming no longer yanks you to the
+  bottom while you're reading scrolled-up history. A floating
+  "↓ Latest" button appears instead and re-pins on click. Sending a
+  message always jumps down.
+- **UI state persists across reloads** — layout (Chat/CLI/Both), model
+  picker, auto-inject toggle, and the Both-mode splitter ratio are
+  saved to localStorage.
+- **Export to Markdown** — "⤓ Export" button saves the conversation
+  (messages + tool-call notes) as a timestamped `.md` file.
+
+### Polish
+
+- Connection-type indicator now reads **"OAuth"** instead of "CLI" when
+  running on the Claude Pro/Max session (clearer, and no longer clashes
+  with the terminal "CLI panel" naming).
+- Resume moved out of the input row into the meta bar; Export / Remote /
+  Resume grouped at the right with Auto-inject context far right.
+- Composer slimmed down (single-row input, smaller Send/Stop), CLI
+  header buttons restyled to match the chat's button language.
+- Fixed phantom empty space below the composer (the hidden image-
+  attachment bar was rendering because a `display:flex` rule overrode
+  the `hidden` attribute).
+
 ## 0.20.0 — 2026-05-31
 
 ### Fixed — chat (CLI mode) could not modify files
