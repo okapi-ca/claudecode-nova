@@ -113,12 +113,13 @@ function contextMaxForModel(model) {
 function renderContextGauge(inputTokens) {
   const el = document.getElementById("meta-ctx");
   if (!el || typeof inputTokens !== "number") return;
+  const fill = el.querySelector(".ctx-meter__fill");
+  if (!fill) return;
   const max = contextMaxForModel(chatStatus.model || (modelPicker && modelPicker.value));
   const pct = Math.min(100, Math.round((inputTokens / max) * 100));
-  el.textContent = `ctx ${formatTokens(inputTokens)}/${formatTokens(max)} (${pct}%)`;
-  el.title = `Context window used last turn`;
-  // Warn-tint as the window fills up.
-  el.className = "meta-ctx" + (pct >= 85 ? " meta-ctx--high" : pct >= 60 ? " meta-ctx--mid" : "");
+  fill.style.width = pct + "%";
+  fill.className = "ctx-meter__fill" + (pct >= 85 ? " ctx-meter__fill--high" : pct >= 60 ? " ctx-meter__fill--mid" : "");
+  el.title = `Context: ${formatTokens(inputTokens)} / ${formatTokens(max)} (${pct}%) used last turn`;
 }
 
 function resetSessionCost() {
@@ -1807,15 +1808,8 @@ window.addEventListener("load", () => {
   // first message.
   renderCostMeta(null, null);
 
-  // Show the context gauge as a discoverable placeholder until the first
-  // reply gives us real input_tokens to compute from.
-  {
-    const ctx = document.getElementById("meta-ctx");
-    if (ctx) {
-      ctx.textContent = "ctx —";
-      ctx.title = "Context-window usage — appears after the first reply";
-    }
-  }
+  // The context meter shows an empty bar until the first reply gives us
+  // real input_tokens — its markup (label + track) is already in the HTML.
 
   // Restore persisted UI prefs. Model is restored here visually; the
   // backend is re-told on session_started. Inject toggle + layout too.

@@ -583,10 +583,31 @@ body {
 
 .composer__meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
-/* Context-window gauge — neutral by default, tinted as it fills. */
-.meta-ctx { font-size: 11px; color: var(--text-muted); }
-.meta-ctx--mid  { color: #d8a657; }
-.meta-ctx--high { color: var(--error); font-weight: 600; }
+/* Context-window gauge — a compact progress bar that fills + tints as
+   the context window fills up. Exact figures live in the tooltip. */
+.ctx-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.ctx-meter__track {
+  width: 56px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+.ctx-meter__fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.3s ease, background 0.3s ease;
+}
+.ctx-meter__fill--mid  { background: #d8a657; }
+.ctx-meter__fill--high { background: var(--error); }
 
 /* ── attachment thumbnails (multimodal images) ──────────────────── */
 .attachments {
