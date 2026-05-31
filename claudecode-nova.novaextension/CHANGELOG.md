@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.22.6 — 2026-05-31
+
+### Changed
+
+- The CLI panel's **Restart** button now clears the terminal (screen +
+  scrollback) before relaunching claude, so the new session starts on a
+  clean screen instead of stacking under the previous output.
+
 ## 0.22.5 — 2026-05-31
 
 ### Added
