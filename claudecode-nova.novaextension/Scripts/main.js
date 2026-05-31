@@ -520,6 +520,7 @@ async function startBridge() {
       env.CC_CLAUDE_PATH = nova.workspace.config.get("claudecode.claudeCommand") || "claude";
       env.CC_CLAUDE_ARGS = nova.workspace.config.get("claudecode.claudeArgs") || "";
       env.CC_CHAT_THEME  = nova.config.get("claudecode.chat.theme") || "auto";
+      env.CC_CHAT_CLI_PERMISSION_MODE = nova.config.get("claudecode.chat.cliPermissionMode") || "acceptEdits";
 
       if (apiKey) {
         env.ANTHROPIC_API_KEY = apiKey;

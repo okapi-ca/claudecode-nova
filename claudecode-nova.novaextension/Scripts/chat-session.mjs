@@ -49,7 +49,7 @@ const MIME = {
  * @param {Function} opts.log            (level, msg, data?) → void
  */
 export async function init(opts) {
-  const { port, apiKey, model: initialModel = "claude-sonnet-4-6", callNovaTool, log, claudePath, getBridgeInfo } = opts;
+  const { port, apiKey, model: initialModel = "claude-sonnet-4-6", cliPermissionMode = "acceptEdits", callNovaTool, log, claudePath, getBridgeInfo } = opts;
 
   // The currently-active model. Starts from the value `init()` was called
   // with (read by main.js from claudecode.chat.model), can be flipped at
@@ -203,6 +203,14 @@ export async function init(opts) {
         "--verbose", // required for stream-json to emit deltas
         "--model", model,
       ];
+      // In non-interactive `-p` mode the default permission mode is read-only:
+      // file-edit prompts can't be answered, so Write/Edit are silently denied
+      // and the chat can read but never modify files. Pass the configured mode
+      // (default acceptEdits) so file modifications actually land. `default`
+      // preserves the old read-only behaviour for users who want it.
+      if (cliPermissionMode && cliPermissionMode !== "default") {
+        args.push("--permission-mode", cliPermissionMode);
+      }
       if (sessionId) args.push("--resume", sessionId);
 
       // Inherit env; Nova passes a limited PATH so we extend it with the

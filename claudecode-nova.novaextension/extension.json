@@ -3,7 +3,7 @@
   "name": "Claude Code Bridge",
   "organization": "okapi-ca",
   "description": "Native Claude Code integration for Nova. The MCP bridge wires the Claude Code CLI to your editor (selection sharing, inline diff review, file ops). An opt-in chat panel runs Claude via the Anthropic SDK or your existing Claude Pro/Max subscription — slash commands, live model picker, streaming reasoning, and a real in-window terminal powered by node-pty. Resume any past session from the sidebar in one click.",
-  "version": "0.19.1",
+  "version": "0.20.0",
   "categories": ["commands", "sidebars"],
   "license": "MIT",
   "repository": "https://github.com/okapi-ca/claudecode-nova",
@@ -313,6 +313,18 @@
       "type": "number",
       "default": 5180,
       "description": "Fixed port for the chat HTTP server. Configure Nova's Project Settings → Preview URL to http://127.0.0.1:<port>/ to use the chat UI inside the Preview tab."
+    },
+    {
+      "key": "claudecode.chat.cliPermissionMode",
+      "title": "Chat CLI permission mode (no-API-key fallback)",
+      "type": "enum",
+      "values": [
+        ["acceptEdits", "Accept edits — chat can create/modify files, but not run shell commands"],
+        ["bypassPermissions", "Bypass all — chat can edit files AND run shell commands (most powerful, least safe)"],
+        ["default", "Read-only — chat can read/answer but never modify files"]
+      ],
+      "default": "acceptEdits",
+      "description": "Permission mode passed to `claude --permission-mode` when the chat runs in CLI fallback mode (no Anthropic API key — uses your Claude Pro/Max session). In non-interactive `-p` mode the default is read-only because file-edit prompts cannot be answered, so file modifications are silently denied. `acceptEdits` (recommended) auto-approves file edits. `bypassPermissions` also allows shell commands. SDK mode (with an API key) is unaffected — it pre-approves Nova tools via allowedTools."
     }
   ],
 

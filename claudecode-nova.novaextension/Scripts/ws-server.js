@@ -716,6 +716,7 @@ async function startServer() {
           port: CHAT_PORT,
           apiKey: CHAT_API_KEY || null,
           model: CHAT_MODEL,
+          cliPermissionMode: process.env.CC_CHAT_CLI_PERMISSION_MODE || "acceptEdits",
           claudePath: process.env.CC_CLAUDE_PATH || "claude",
           callNovaTool,
           getBridgeInfo: () => ({
