@@ -1087,7 +1087,7 @@ body {
   flex: 1;
   overflow: hidden;
   position: relative; /* anchor the floating "Jump to latest" button */
-  background: var(--surface-card);
+  background: var(--surface-desk); /* = page bg, so the card reads as just a thin border frame */
 }
 
 /* Floating "↓ Latest" — shown only when the user has scrolled up while
@@ -1126,6 +1126,7 @@ body {
   margin: 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
+  background: var(--surface-card); /* the floating results panel's own surface */
 }
 
 .chat-panel > .composer {
