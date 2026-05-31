@@ -10,7 +10,7 @@
   --accent:       #7c9eff;
   --accent-warm:  #ffb454;
   --user-bg:      #2e3a52;
-  --assistant-bg: #1e1e22;
+  --assistant-bg: #26262e;
   --tool-bg:      #252027;
   --tool-border:  #4a3a52;
   --error:        #ff7676;
@@ -902,7 +902,7 @@ body {
     --accent:       #2b5bd8;
     --accent-warm:  #b56a08;
     --user-bg:      #e3ecff;
-    --assistant-bg: #fafafa;
+    --assistant-bg: #eef0f4;
     --tool-bg:      #fff7ed;
     --tool-border:  #e8c890;
     --error:        #c41818;
