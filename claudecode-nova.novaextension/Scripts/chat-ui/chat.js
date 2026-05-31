@@ -1544,7 +1544,7 @@ function renderChatStatus() {
   const txt = document.getElementById("chat-status-text");
   if (!dot || !txt) return;
   const bits = ["Chat:"];
-  if (chatStatus.mode) bits.push(chatStatus.mode.toUpperCase());
+  if (chatStatus.mode) bits.push(chatStatus.mode === "cli" ? "OAuth" : chatStatus.mode.toUpperCase());
   if (chatStatus.model) bits.push(chatStatus.model.replace(/^claude-/, ""));
   bits.push("port " + chatStatus.port);
   txt.textContent = bits.join(" · ");
@@ -1556,8 +1556,8 @@ function renderChatStatus() {
 function applyModeBadge(mode) {
   if (!metaMode) return;
   if (mode === "cli") {
-    metaMode.textContent = "CLI";
-    metaMode.title = "Claude Code OAuth session — covered by subscription";
+    metaMode.textContent = "OAuth";
+    metaMode.title = "Claude Code OAuth session — covered by your Pro/Max subscription";
     metaMode.className = "meta-mode meta-mode--cli";
     metaMode.hidden = false;
   } else if (mode === "sdk") {
