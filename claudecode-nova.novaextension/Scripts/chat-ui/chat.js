@@ -89,14 +89,17 @@ function renderCostMeta(lastCost, lastTokens) {
   }
   if (sessionCost > 0) parts.push(`session $${sessionCost.toFixed(4)}`);
   if (d.cost > 0)      parts.push(`today $${d.cost.toFixed(4)}`);
+  // Tokens in clear (not just a tooltip) — last turn's in/out.
+  if (lastTokens && (lastTokens.input != null || lastTokens.output != null)) {
+    parts.push(`${formatTokens(lastTokens.input)} in / ${formatTokens(lastTokens.output)} out`);
+  }
   metaCost.textContent = parts.join(" · ");
-  // Detailed token breakdown in tooltip so the meta bar stays compact.
+  // Tooltip keeps the cumulative session/today token breakdown.
   const tooltip = [
-    lastTokens ? `Last: ${formatTokens(lastTokens.input)} in / ${formatTokens(lastTokens.output)} out` : null,
     sessionInTk + sessionOutTk > 0 ? `Session: ${formatTokens(sessionInTk)} in / ${formatTokens(sessionOutTk)} out` : null,
     (d.inTk || 0) + (d.outTk || 0) > 0 ? `Today: ${formatTokens(d.inTk)} in / ${formatTokens(d.outTk)} out` : null,
   ].filter(Boolean).join("\n");
-  metaCost.title = tooltip || "No cost data yet";
+  metaCost.title = tooltip || "Cost & tokens (last turn shown inline)";
 }
 
 // Context-window gauge. The latest turn's input_tokens approximates how
@@ -112,8 +115,8 @@ function renderContextGauge(inputTokens) {
   if (!el || typeof inputTokens !== "number") return;
   const max = contextMaxForModel(chatStatus.model || (modelPicker && modelPicker.value));
   const pct = Math.min(100, Math.round((inputTokens / max) * 100));
-  el.textContent = `ctx ${pct}%`;
-  el.title = `Context window: ${formatTokens(inputTokens)} / ${formatTokens(max)} tokens used last turn`;
+  el.textContent = `ctx ${formatTokens(inputTokens)}/${formatTokens(max)} (${pct}%)`;
+  el.title = `Context window used last turn`;
   // Warn-tint as the window fills up.
   el.className = "meta-ctx" + (pct >= 85 ? " meta-ctx--high" : pct >= 60 ? " meta-ctx--mid" : "");
 }
