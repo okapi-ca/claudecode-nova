@@ -473,10 +473,17 @@ body {
   transition: color 0.15s, border-color 0.15s;
 }
 .meta-btn:hover { color: var(--text); border-color: var(--accent); }
-/* The first item of the right-aligned group absorbs the slack, so
-   Export + Remote + Resume + the toggle group cleanly at the right
-   with the toggle ending far right. */
-#export-md { margin-left: auto; }
+/* Three-zone meta bar: model + auth on the left, cost/ctx centered,
+   action buttons on the right. The centered group's auto margins on both
+   sides push it to the middle and shove the action group to the far
+   right (so #export-md no longer needs its own margin-left:auto). */
+.meta-center {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  margin-right: auto;
+}
 
 /* ── scrollbar ──────────────────────────────────────────────────── */
 
