@@ -1669,25 +1669,16 @@ function showLiveSessionsMenu(sessions) {
     resumeMenu.querySelectorAll(".resume-menu__item").forEach((el) => {
       el.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        attachLiveSession(el.dataset.sid);
+        const sid = el.dataset.sid;
+        const preview = el.querySelector(".resume-menu__preview")?.textContent || "";
+        // Resume the picked session IN THE CHAT (replay transcript +
+        // continue with --resume), not in the CLI panel.
+        if (panelsEl && chatPanel && chatPanel.hidden) setLayout("chat");
+        pickResumeSession(sid, preview);
       });
     });
   }
   resumeMenu.hidden = false;
-}
-
-// Jump into a running session: open the CLI panel and resume it there.
-function attachLiveSession(sessionId) {
-  hideResumeMenu();
-  if (!sessionId) return;
-  if (panelsEl && termPanel.hidden) setLayout("cli");
-  ensureTerminal();
-  if (termInstance) {
-    termInstance.write(`\r\n\x1b[36m[attaching to live session ${sessionId.slice(0, 8)}…]\x1b[0m\r\n`);
-    try { termInstance.clear(); } catch (_) {}
-  }
-  if (termWs) { try { termWs.close(); } catch (_) {} termWs = null; }
-  connectTerminalWs(sessionId);
 }
 
 function openLiveSessions() {
