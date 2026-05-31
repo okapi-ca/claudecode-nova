@@ -1284,18 +1284,6 @@ function ensureTerminal() {
     }
   });
   connectTerminalWs();
-  // Resize the PTY whenever the terminal element changes size.
-  window.addEventListener("resize", () => {
-    if (termFitAddon) {
-      try {
-        termFitAddon.fit();
-        const cols = termInstance.cols, rows = termInstance.rows;
-        if (termWs && termWs.readyState === WebSocket.OPEN) {
-          termWs.send(JSON.stringify({ type: "resize", cols, rows }));
-        }
-      } catch (_) {}
-    }
-  });
   return termInstance;
 }
 
@@ -1453,6 +1441,27 @@ function setLayout(mode) {
 if (layoutBtns.chat) layoutBtns.chat.addEventListener("click", () => setLayout("chat"));
 if (layoutBtns.both) layoutBtns.both.addEventListener("click", () => setLayout("both"));
 if (layoutBtns.cli)  layoutBtns.cli.addEventListener("click",  () => setLayout("cli"));
+
+// Single debounced window-resize handler. Re-fits the terminal only when
+// its panel is actually visible (a hidden panel reports zero size, which
+// corrupts xterm's grid), and keeps the chat pinned to the bottom across
+// the reflow if the user was already there.
+let _resizeTimer = null;
+window.addEventListener("resize", () => {
+  if (_resizeTimer) clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    _resizeTimer = null;
+    if (termInstance && termFitAddon && termPanel && !termPanel.hidden) {
+      try {
+        termFitAddon.fit();
+        if (termWs && termWs.readyState === WebSocket.OPEN) {
+          termWs.send(JSON.stringify({ type: "resize", cols: termInstance.cols, rows: termInstance.rows }));
+        }
+      } catch (_) {}
+    }
+    if (pinnedToBottom && chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+  }, 120);
+});
 
 // Restart the CLI panel's claude session. Spawns a fresh PTY without
 // reloading the page — fixes the dead-end where quitting claude left
