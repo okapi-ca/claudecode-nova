@@ -920,6 +920,22 @@ body {
 
 .terminal__title { color: var(--text); font-weight: 600; }
 .terminal__hint  { color: var(--text-muted); }
+
+/* Restart button — pushed to the right edge of the terminal header.
+   Always visible so there's an obvious way back after quitting claude. */
+.term-restart {
+  margin-left: auto;
+  align-self: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 2px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.term-restart:hover { color: var(--text); border-color: var(--accent); }
 .terminal__hint code {
   background: rgba(255,255,255,0.06);
   padding: 1px 4px;

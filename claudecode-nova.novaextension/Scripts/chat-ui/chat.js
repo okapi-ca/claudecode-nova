@@ -1100,7 +1100,14 @@ function currentTerminalTheme() {
 }
 
 function ensureTerminal() {
-  if (termInstance) return termInstance;
+  if (termInstance) {
+    // Terminal UI already built. If the PTY exited (ws closed → termWs
+    // null), reconnect so a fresh `claude` spawns. This is what makes
+    // "switch layout to reconnect" — and the Restart button — actually
+    // work after the user quits claude.
+    if (!termWs) connectTerminalWs();
+    return termInstance;
+  }
   if (typeof Terminal === "undefined") return null; // xterm.js not loaded yet
   const host = document.getElementById("terminal-host");
   if (!host) return null;
@@ -1148,7 +1155,11 @@ function connectTerminalWs(sessionIdToResume) {
   const qs = sessionIdToResume ? `?session=${encodeURIComponent(sessionIdToResume)}` : "";
   const url = `ws://${location.host}/cli${qs}`;
   termWs = new WebSocket(url);
-  termWs.addEventListener("message", (e) => {
+  // Capture this socket so handlers can tell whether they belong to the
+  // CURRENT connection. Without this, an old socket's late `close` event
+  // would null out `termWs` even after a restart already opened a new one.
+  const sock = termWs;
+  sock.addEventListener("message", (e) => {
     let msg;
     try { msg = JSON.parse(e.data); } catch { return; }
     if (msg.type === "output" && termInstance) termInstance.write(msg.data);
@@ -1161,17 +1172,20 @@ function connectTerminalWs(sessionIdToResume) {
         termInstance.write(`\r\n\x1b[36m[resuming session ${msg.sessionId.slice(0, 8)}…]\x1b[0m\r\n`);
         termInstance.clear();
       }
-      try { termWs && termWs.close(); } catch (_) {}
-      termWs = null;
+      try { sock.close(); } catch (_) {}
+      if (termWs === sock) termWs = null;
       connectTerminalWs(msg.sessionId);
     }
   });
-  termWs.addEventListener("close", () => {
+  sock.addEventListener("close", () => {
+    // Only react if this is still the active socket — a stale close from
+    // a just-replaced connection must not clobber the new termWs.
+    if (termWs !== sock) return;
     termWs = null;
-    if (termInstance) termInstance.write("\r\n\x1b[90m[terminal disconnected — switch layout to reconnect]\x1b[0m\r\n");
+    if (termInstance) termInstance.write("\r\n\x1b[90m[claude session ended — click ↻ Restart to relaunch]\x1b[0m\r\n");
   });
-  termWs.addEventListener("error", () => {
-    if (termInstance) termInstance.write("\r\n\x1b[31m[terminal ws error]\x1b[0m\r\n");
+  sock.addEventListener("error", () => {
+    if (termWs === sock && termInstance) termInstance.write("\r\n\x1b[31m[terminal ws error]\x1b[0m\r\n");
   });
 }
 
@@ -1277,6 +1291,27 @@ function setLayout(mode) {
 if (layoutBtns.chat) layoutBtns.chat.addEventListener("click", () => setLayout("chat"));
 if (layoutBtns.both) layoutBtns.both.addEventListener("click", () => setLayout("both"));
 if (layoutBtns.cli)  layoutBtns.cli.addEventListener("click",  () => setLayout("cli"));
+
+// Restart the CLI panel's claude session. Spawns a fresh PTY without
+// reloading the page — fixes the dead-end where quitting claude left
+// the panel with no way back. If the terminal was never built (xterm
+// not loaded / panel never shown), ensureTerminal() builds it; if it
+// exists but the ws is closed, ensureTerminal() reconnects.
+function restartTerminal() {
+  if (termInstance && termWs) {
+    // A live session is running — tear it down first so the close
+    // handler fires and the backend kills the old PTY, then reconnect.
+    termInstance.write("\r\n\x1b[36m[restarting claude…]\x1b[0m\r\n");
+    try { termWs.close(); } catch (_) {}
+    termWs = null;
+  } else if (termInstance) {
+    termInstance.write("\r\n\x1b[36m[starting claude…]\x1b[0m\r\n");
+  }
+  ensureTerminal(); // builds and/or reconnects
+}
+
+const termRestartBtn = document.getElementById("term-restart");
+if (termRestartBtn) termRestartBtn.addEventListener("click", restartTerminal);
 
 if (modelPicker) {
   modelPicker.addEventListener("change", () => {
