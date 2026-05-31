@@ -925,19 +925,21 @@ body {
    right edge. Always visible so there's an obvious way to relaunch or
    resume after quitting claude. */
 .terminal__header { position: relative; }
+/* Match the topbar layout buttons (.layout-btn): transparent, light,
+   11px — not a heavy filled button. */
 .term-action {
   align-self: center;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 0;
   color: var(--text-muted);
-  padding: 2px 10px;
+  font: inherit;
   font-size: 11px;
-  border-radius: 4px;
+  padding: 3px 8px;
+  border-radius: 3px;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
   white-space: nowrap;
 }
-.term-action:hover { color: var(--text); border-color: var(--accent); }
+.term-action:hover { color: var(--text); background: var(--bg-elevated); }
 /* First action button absorbs the slack, pushing the group right. */
 #term-resume { margin-left: auto; }
 
