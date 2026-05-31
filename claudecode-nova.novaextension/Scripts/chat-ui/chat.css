@@ -921,10 +921,11 @@ body {
 .terminal__title { color: var(--text); font-weight: 600; }
 .terminal__hint  { color: var(--text-muted); }
 
-/* Restart button — pushed to the right edge of the terminal header.
-   Always visible so there's an obvious way back after quitting claude. */
-.term-restart {
-  margin-left: auto;
+/* Terminal header action buttons (Resume, Restart) — grouped at the
+   right edge. Always visible so there's an obvious way to relaunch or
+   resume after quitting claude. */
+.terminal__header { position: relative; }
+.term-action {
   align-self: center;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -934,8 +935,28 @@ body {
   border-radius: 4px;
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
 }
-.term-restart:hover { color: var(--text); border-color: var(--accent); }
+.term-action:hover { color: var(--text); border-color: var(--accent); }
+/* First action button absorbs the slack, pushing the group right. */
+#term-resume { margin-left: auto; }
+
+/* CLI Resume dropdown — drops DOWN from the header into the terminal
+   body (the .terminal wrapper has overflow:hidden, so it must open
+   downward, not upward). Reuses .resume-menu__* item styles. */
+.term-resume-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 8px;
+  width: min(360px, 80%);
+  max-height: 320px;
+  overflow-y: auto;
+  background: #25252b;
+  border: 1px solid #3a3a42;
+  border-radius: var(--radius, 6px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  z-index: 20;
+}
 .terminal__hint code {
   background: rgba(255,255,255,0.06);
   padding: 1px 4px;

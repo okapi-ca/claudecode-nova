@@ -104,7 +104,9 @@
       <div class="terminal__header">
         <span class="terminal__title">Claude Code CLI</span>
         <span class="terminal__hint">type <code>claude</code> prompts directly · Ctrl+C to interrupt</span>
-        <button id="term-restart" class="term-restart" title="Restart the claude session (spawns a fresh PTY)">↻ Restart</button>
+        <button id="term-resume" class="term-action" title="Resume a previous claude session in the terminal">⏱ Resume</button>
+        <button id="term-restart" class="term-action" title="Restart the claude session (spawns a fresh PTY)">↻ Restart</button>
+        <div id="term-resume-menu" class="term-resume-menu" hidden></div>
       </div>
       <div id="terminal-host" class="terminal__host"></div>
     </section>

@@ -647,7 +647,9 @@ function connect() {
 function handleServerMessage(msg) {
   switch (msg.type) {
     case "sessions":
-      showResumeMenu(msg.sessions || []);
+      if (pendingSessionsFor === "cli") showTermResumeMenu(msg.sessions || []);
+      else showResumeMenu(msg.sessions || []);
+      pendingSessionsFor = null;
       break;
 
     case "resume_external":
@@ -1088,6 +1090,11 @@ inputEl.addEventListener("paste", async (e) => {
 let termInstance = null;
 let termFitAddon = null;
 let termWs = null;
+// Which UI requested the next `list_sessions` reply: "chat" routes it to
+// the composer's Resume menu, "cli" to the terminal panel's Resume menu.
+// Both share the one chat WebSocket, so we tag the request to dispatch
+// the single "sessions" reply to the right place.
+let pendingSessionsFor = null;
 
 // Pick the xterm.js theme object matching the current data-theme
 // attribute on <html>. Re-called whenever the page theme changes.
@@ -1313,6 +1320,79 @@ function restartTerminal() {
 const termRestartBtn = document.getElementById("term-restart");
 if (termRestartBtn) termRestartBtn.addEventListener("click", restartTerminal);
 
+// CLI panel Resume — list the workspace's past sessions and relaunch
+// the terminal with `claude --resume <id>`. Reuses the chat backend's
+// list_sessions (same session list) and the terminal's ?session= path.
+const termResumeMenu = document.getElementById("term-resume-menu");
+
+function showTermResumeMenu(sessions) {
+  if (!termResumeMenu) return;
+  if (!sessions || sessions.length === 0) {
+    termResumeMenu.innerHTML = `<div class="resume-menu__empty">No previous sessions for this workspace.</div>`;
+  } else {
+    termResumeMenu.innerHTML = sessions.map((s) => `
+      <button class="resume-menu__item" data-sid="${s.sessionId}" title="${escapeHtml(s.sessionId)}">
+        <span class="resume-menu__preview">${escapeHtml(s.preview || "(empty session)")}</span>
+        <span class="resume-menu__meta">
+          <span class="resume-menu__sid">${escapeHtml(s.sessionId)}</span>
+          <span>${relativeTimeShort(s.mtimeMs)}${s.gitBranch ? " · " + escapeHtml(s.gitBranch) : ""}</span>
+        </span>
+      </button>
+    `).join("");
+    termResumeMenu.querySelectorAll(".resume-menu__item").forEach((el) => {
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        resumeTerminalSession(el.dataset.sid, el.querySelector(".resume-menu__preview")?.textContent || "");
+      });
+    });
+  }
+  termResumeMenu.hidden = false;
+}
+
+function hideTermResumeMenu() {
+  if (termResumeMenu) termResumeMenu.hidden = true;
+}
+
+// Relaunch the CLI panel's claude with --resume <id>. Modeled on the
+// resume_external flow (sidebar-initiated resume): show the panel,
+// announce, tear down the current PTY, reconnect with the session.
+function resumeTerminalSession(sessionId, preview) {
+  hideTermResumeMenu();
+  if (panelsEl && termPanel.hidden) setLayout("cli");
+  ensureTerminal();
+  if (termInstance) {
+    termInstance.write(`\r\n\x1b[36m[resuming session ${sessionId.slice(0, 8)}…${preview ? " — " + preview : ""}]\x1b[0m\r\n`);
+    try { termInstance.clear(); } catch (_) {}
+  }
+  if (termWs) { try { termWs.close(); } catch (_) {} termWs = null; }
+  connectTerminalWs(sessionId);
+}
+
+const termResumeBtn = document.getElementById("term-resume");
+if (termResumeBtn) {
+  termResumeBtn.addEventListener("click", () => {
+    if (termResumeMenu && !termResumeMenu.hidden) { hideTermResumeMenu(); return; }
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      if (termInstance) termInstance.write("\r\n\x1b[31m[cannot list sessions — chat backend not connected]\x1b[0m\r\n");
+      return;
+    }
+    pendingSessionsFor = "cli";
+    ws.send(JSON.stringify({ type: "list_sessions" }));
+    if (termResumeMenu) {
+      termResumeMenu.innerHTML = `<div class="resume-menu__empty">Loading sessions…</div>`;
+      termResumeMenu.hidden = false;
+    }
+  });
+}
+
+// Close the CLI resume menu on outside click.
+document.addEventListener("mousedown", (e) => {
+  if (termResumeMenu && !termResumeMenu.hidden &&
+      !termResumeMenu.contains(e.target) && e.target !== termResumeBtn) {
+    hideTermResumeMenu();
+  }
+});
+
 if (modelPicker) {
   modelPicker.addEventListener("change", () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -1382,6 +1462,7 @@ if (resumeBtn) {
   resumeBtn.addEventListener("click", () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (resumeMenu && !resumeMenu.hidden) { hideResumeMenu(); return; }
+    pendingSessionsFor = "chat";
     ws.send(JSON.stringify({ type: "list_sessions" }));
     // The "sessions" reply will trigger showResumeMenu(). Show a
     // momentary loading state.
