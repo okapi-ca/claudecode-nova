@@ -325,7 +325,7 @@ export async function init(opts) {
       const filePath = join(CHAT_UI_DIR, path);
       const data = await readFile(filePath);
       const mime = MIME[extname(filePath)] || "application/octet-stream";
-      res.writeHead(200, { "content-type": mime, "cache-control": "no-cache" });
+      res.writeHead(200, { "content-type": mime, "cache-control": "no-store, must-revalidate" });
       res.end(data);
     } catch (err) {
       if (err.code === "ENOENT") { res.writeHead(404); res.end("Not Found"); }
