@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.22.2 — 2026-05-31
+
+### Fixed
+
+- **Zombie chat port (5180)** — when a stale chat server from a previous
+  Nova session was still holding the port at relaunch, the chat server
+  gave up binding and stayed dead until a manual "Restart Bridge". It now
+  retries the bind up to 8× over ~6s on `EADDRINUSE`, auto-recovering
+  once the old process exits.
+
 ## 0.22.1 — 2026-05-31
 
 ### Polish — floating panels
