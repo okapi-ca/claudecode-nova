@@ -389,7 +389,7 @@ body {
 .composer {
   border-top: 1px solid var(--border);
   background: var(--bg-elevated);
-  padding: 10px 18px 14px;
+  padding: 8px 18px 8px;
   flex-shrink: 0;
 }
 
@@ -571,6 +571,10 @@ body {
   flex-wrap: wrap;
   padding: 8px 0 4px;
 }
+/* `display:flex` above has the same specificity as the UA [hidden]
+   rule and wins by source order, so the empty bar would always show.
+   Re-assert the hidden state explicitly. */
+.attachments[hidden] { display: none; }
 
 .attachment {
   position: relative;
