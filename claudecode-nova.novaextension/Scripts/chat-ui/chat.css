@@ -454,18 +454,23 @@ body {
   border-color: var(--error);
 }
 
-/* Resume… is a minor, non-destructive action — it inherited the big red
-   .btn--secondary style (which suits the destructive Stop button). Make
-   it compact and neutral so it reads as a secondary action next to Send,
-   not an alarming red one. Stop keeps the red treatment. */
-#resume {
-  padding: 6px 12px;
-  font-size: 12px;
+/* Resume… lives in the composer meta bar (above the input), pushed to
+   the far right. Light/compact like the topbar buttons — not the big
+   red .btn--secondary it used to inherit. */
+.meta-btn {
+  margin-left: auto; /* push to the far right of the meta bar */
   background: transparent;
+  border: 1px solid var(--border);
   color: var(--text-muted);
-  border-color: var(--border);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
 }
-#resume:hover { color: var(--text); border-color: var(--accent); }
+.meta-btn:hover { color: var(--text); border-color: var(--accent); }
 
 /* ── scrollbar ──────────────────────────────────────────────────── */
 
