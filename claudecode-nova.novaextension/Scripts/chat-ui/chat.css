@@ -454,6 +454,19 @@ body {
   border-color: var(--error);
 }
 
+/* Resume… is a minor, non-destructive action — it inherited the big red
+   .btn--secondary style (which suits the destructive Stop button). Make
+   it compact and neutral so it reads as a secondary action next to Send,
+   not an alarming red one. Stop keeps the red treatment. */
+#resume {
+  padding: 6px 12px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+#resume:hover { color: var(--text); border-color: var(--accent); }
+
 /* ── scrollbar ──────────────────────────────────────────────────── */
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
