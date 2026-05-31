@@ -74,10 +74,6 @@
           <button id="export-md" class="meta-btn" title="Export this conversation as a Markdown file">⤓ Export</button>
           <button id="remote-control" class="meta-btn" title="List claude sessions running on this machine and jump into one in the CLI panel">⇄ Live</button>
           <button id="resume" class="meta-btn" title="Resume a previous session">⏱ Resume…</button>
-          <label class="composer__toggle" title="Prepend your current file + selection to every prompt">
-            <input type="checkbox" id="inject-context" checked />
-            <span>Auto-inject context</span>
-          </label>
         </div>
         <div id="attachments" class="attachments" hidden></div>
         <div class="composer__row">
@@ -98,9 +94,15 @@
           <button id="abort" class="btn btn--secondary" title="Abort current query" hidden>Stop</button>
         </div>
         <div class="composer__costline">
-          <span id="meta-session"></span>
-          <span id="meta-cost"></span>
-          <span id="meta-ctx" class="meta-ctx"></span>
+          <span class="costline__info">
+            <span id="meta-session"></span>
+            <span id="meta-cost"></span>
+            <span id="meta-ctx" class="meta-ctx"></span>
+          </span>
+          <label class="composer__toggle" title="Prepend your current file + selection to every prompt">
+            <input type="checkbox" id="inject-context" checked />
+            <span>Auto-inject context</span>
+          </label>
         </div>
       </footer>
     </div>

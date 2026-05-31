@@ -477,16 +477,24 @@ body {
    meta bar; the first one absorbs the slack. */
 #export-md { margin-left: auto; }
 
-/* Cost / context line — centered, on its own row below the input. */
+/* Bottom line below the input: cost/context centered, auto-inject
+   toggle pushed to the right. The info group's auto margins on both
+   sides center it and shove the toggle to the far right. */
 .composer__costline {
   display: flex;
-  justify-content: center;
   align-items: center;
   gap: 12px;
   padding-top: 6px;
   font-size: 11px;
   color: var(--text-muted);
   min-height: 14px; /* reserve space so the composer doesn't jump */
+}
+.costline__info {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* ── scrollbar ──────────────────────────────────────────────────── */
