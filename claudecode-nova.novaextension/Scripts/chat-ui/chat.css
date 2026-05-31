@@ -411,14 +411,16 @@ body {
 #input {
   flex: 1;
   resize: vertical;
-  min-height: 42px;
+  min-height: 32px;
   max-height: 200px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text);
   font: inherit;
-  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 7px 10px;
 }
 
 #input:focus {
@@ -430,9 +432,10 @@ body {
   background: var(--bg-input);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 10px 16px;
+  padding: 7px 14px;
   border-radius: var(--radius);
   font: inherit;
+  font-size: 13px;
   cursor: pointer;
 }
 
