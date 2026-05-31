@@ -477,6 +477,10 @@ body {
    meta bar; the first one absorbs the slack. */
 #export-md { margin-left: auto; }
 
+/* Session id — clickable to copy the full id. */
+#meta-session:not(:empty) { cursor: pointer; }
+#meta-session:hover { color: var(--text); }
+
 /* Bottom line below the input: cost/context centered, auto-inject
    toggle pushed to the right. The info group's auto margins on both
    sides center it and shove the toggle to the far right. */

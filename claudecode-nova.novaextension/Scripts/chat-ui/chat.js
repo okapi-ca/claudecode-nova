@@ -808,6 +808,7 @@ function handleServerMessage(msg) {
 
     case "session_started":
       metaSess.textContent = `session ${msg.sessionId.slice(0, 8)}…`;
+      metaSess.title = `${msg.sessionId}\n(click to copy)`;
       // Reset session cost when the backend starts a fresh session
       // (different ID than what we last saw). Resume/replay keep the
       // same ID and therefore the same running totals.
@@ -1103,6 +1104,19 @@ if (ctxGauge) {
   ctxGauge.addEventListener("click", requestCompaction);
   ctxGauge.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); requestCompaction(); }
+  });
+}
+
+// Clicking the session indicator copies the full session id.
+if (metaSess) {
+  metaSess.addEventListener("click", async () => {
+    if (!currentSessionId) return;
+    try {
+      await navigator.clipboard.writeText(currentSessionId);
+      const orig = metaSess.textContent;
+      metaSess.textContent = "copied!";
+      setTimeout(() => { metaSess.textContent = orig; }, 1200);
+    } catch (_) { /* clipboard unavailable */ }
   });
 }
 
