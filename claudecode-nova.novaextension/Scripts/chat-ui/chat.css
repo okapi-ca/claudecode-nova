@@ -140,6 +140,7 @@ body {
 .msg {
   max-width: 880px;
   width: 100%;
+  min-width: 0;          /* allow shrinking below wide content (no h-overflow) */
   align-self: flex-start;
   display: flex;
   flex-direction: column;
@@ -160,6 +161,9 @@ body {
   border-radius: var(--radius);
   border: 1px solid var(--border);
   word-wrap: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;        /* never push the message wider than its container */
 }
 
 .msg--user .msg__body {
@@ -180,6 +184,7 @@ body {
   padding: 12px;
   border-radius: 6px;
   overflow-x: auto;
+  max-width: 100%;       /* cap to the bubble; scroll inside instead of overflowing */
   margin: 8px 0;
   position: relative;
 }
@@ -311,6 +316,7 @@ body {
   padding: 0;
   overflow: hidden;
   max-width: 880px;
+  min-width: 0;
   align-self: flex-start;
 }
 
