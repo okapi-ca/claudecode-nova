@@ -993,7 +993,7 @@ body {
   background: #0d0d0f;
   min-height: 0;
   flex: 1; /* fill the panels area when terminal is the only visible panel */
-  padding-bottom: 14px; /* gap between the claude TUI box and the card edge */
+  padding-bottom: 10px; /* match the host's 10px top gap below the header */
 }
 
 .terminal__header {
