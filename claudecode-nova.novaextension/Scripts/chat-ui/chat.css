@@ -950,19 +950,22 @@ body {
 .terminal__header { position: relative; }
 /* Match the topbar layout buttons (.layout-btn): transparent, light,
    11px — not a heavy filled button. */
+/* Harmonized with the chat meta-bar buttons (.meta-btn): transparent
+   with a subtle border, 11px, accent border on hover. */
 .term-action {
   align-self: center;
   background: transparent;
-  border: 0;
+  border: 1px solid var(--border);
   color: var(--text-muted);
   font: inherit;
   font-size: 11px;
-  padding: 3px 8px;
-  border-radius: 3px;
+  padding: 2px 10px;
+  border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
 }
-.term-action:hover { color: var(--text); background: var(--bg-elevated); }
+.term-action:hover { color: var(--text); border-color: var(--accent); }
 /* First action button absorbs the slack, pushing the group right. */
 #term-resume { margin-left: auto; }
 
