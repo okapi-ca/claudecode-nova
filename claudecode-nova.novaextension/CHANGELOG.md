@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.22.1 — 2026-05-31
+
+### Polish — floating panels
+
+- The chat results area and the composer are now **floating panels**
+  (rounded, bordered, inset) inside the chat card, mirroring the way the
+  Claude TUI box floats inside the terminal card. The parent card's fill
+  matches the page background so only a thin frame shows around the
+  floating panels.
+- The composer is aligned with the results panel (same side/bottom
+  insets, border, radius) and stays on the light surface.
+- Equal light top/bottom breathing room inside the terminal and the chat
+  message area; a matching gap below the Claude TUI box so it isn't
+  pinned to the card's bottom edge.
+
 ## 0.22.0 — 2026-05-31
 
 ### Added — chat UX
