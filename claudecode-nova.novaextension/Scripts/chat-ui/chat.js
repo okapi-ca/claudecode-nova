@@ -1474,14 +1474,14 @@ window.addEventListener("resize", () => {
 // not loaded / panel never shown), ensureTerminal() builds it; if it
 // exists but the ws is closed, ensureTerminal() reconnects.
 function restartTerminal() {
-  if (termInstance && termWs) {
-    // A live session is running — tear it down first so the close
-    // handler fires and the backend kills the old PTY, then reconnect.
-    termInstance.write("\r\n\x1b[36m[restarting claude…]\x1b[0m\r\n");
-    try { termWs.close(); } catch (_) {}
-    termWs = null;
-  } else if (termInstance) {
-    termInstance.write("\r\n\x1b[36m[starting claude…]\x1b[0m\r\n");
+  const live = !!(termInstance && termWs);
+  // Tear down a live session first so the backend kills the old PTY.
+  if (termWs) { try { termWs.close(); } catch (_) {} termWs = null; }
+  if (termInstance) {
+    // Clear the screen + scrollback so claude restarts on a clean
+    // terminal instead of stacking under the previous session's output.
+    try { termInstance.clear(); } catch (_) {}
+    termInstance.write(`\r\n\x1b[36m[${live ? "restarting" : "starting"} claude…]\x1b[0m\r\n`);
   }
   ensureTerminal(); // builds and/or reconnects
 }
