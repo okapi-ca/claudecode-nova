@@ -1117,15 +1117,19 @@ body {
   min-height: 0;
 }
 
-/* Re-target chat / composer inside the wrapper */
+/* Re-target chat / composer inside the wrapper. The message area is an
+   inner floating panel (border + radius + margin) inside the chat card,
+   mirroring how the Claude TUI box floats inside the terminal card. */
 .chat-panel > .chat {
   flex: 1;
   min-height: 0;
+  margin: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
 
 .chat-panel > .composer {
   flex-shrink: 0;
-  border-top: 1px solid var(--border);
 }
 
 /* Visual separators for the header and (per-panel) composer */
