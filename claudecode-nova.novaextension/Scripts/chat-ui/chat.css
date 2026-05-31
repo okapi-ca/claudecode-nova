@@ -564,6 +564,11 @@ body {
 
 .composer__meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
+/* Context-window gauge — neutral by default, tinted as it fills. */
+.meta-ctx { font-size: 11px; color: var(--text-muted); }
+.meta-ctx--mid  { color: #d8a657; }
+.meta-ctx--high { color: var(--error); font-weight: 600; }
+
 /* ── attachment thumbnails (multimodal images) ──────────────────── */
 .attachments {
   display: flex;

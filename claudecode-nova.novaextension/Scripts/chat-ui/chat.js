@@ -99,6 +99,25 @@ function renderCostMeta(lastCost, lastTokens) {
   metaCost.title = tooltip || "No cost data yet";
 }
 
+// Context-window gauge. The latest turn's input_tokens approximates how
+// full the context is (system + history + new prompt sent that turn).
+// Max depends on the model: the Opus 4.8 "1M" variant gets 1,000,000,
+// everything else 200,000.
+function contextMaxForModel(model) {
+  return /opus-4-8/.test(model || "") ? 1000000 : 200000;
+}
+
+function renderContextGauge(inputTokens) {
+  const el = document.getElementById("meta-ctx");
+  if (!el || typeof inputTokens !== "number") return;
+  const max = contextMaxForModel(chatStatus.model || (modelPicker && modelPicker.value));
+  const pct = Math.min(100, Math.round((inputTokens / max) * 100));
+  el.textContent = `ctx ${pct}%`;
+  el.title = `Context window: ${formatTokens(inputTokens)} / ${formatTokens(max)} tokens used last turn`;
+  // Warn-tint as the window fills up.
+  el.className = "meta-ctx" + (pct >= 85 ? " meta-ctx--high" : pct >= 60 ? " meta-ctx--mid" : "");
+}
+
 function resetSessionCost() {
   sessionCost = 0;
   sessionInTk = 0;
@@ -236,6 +255,7 @@ const SLASH_COMMANDS = [
 // the input. Setting this here so the next send() picks it up.
 let pendingSlashCommand = null;
 let slashMenuVisible = false;
+let lastSentText = ""; // last prompt sent — recalled by ArrowUp on empty input
 let slashMenuActive = 0;
 
 // ── markdown render setup ─────────────────────────────────────────
@@ -842,6 +862,9 @@ function handleServerMessage(msg) {
       } else if (!msg.success) {
         appendErrorMessage(msg.error || "query failed");
       }
+      if (msg.tokens && typeof msg.tokens.input === "number") {
+        renderContextGauge(msg.tokens.input);
+      }
       break;
 
     case "error":
@@ -889,6 +912,7 @@ function sendUserMessage() {
     ? `/${slashCommand}${text ? " " + text : ""}`
     : (text || "(image only)")) + attachmentsLabel;
   appendUserMessage(displayText);
+  if (text) lastSentText = text; // for ArrowUp edit/resend recall
 
   // Build the attachments payload — drop too-large ones, strip dataUrl
   // (frontend-only) but keep base64 data + mediaType for the backend.
@@ -1039,6 +1063,23 @@ function abortQuery() {
 sendBtn.addEventListener("click", sendUserMessage);
 abortBtn.addEventListener("click", abortQuery);
 
+// Global keyboard shortcuts.
+//   Cmd/Ctrl+K  → focus the composer input from anywhere
+//   Esc         → abort the in-flight query (when not dismissing a menu)
+// (Cmd+L is intentionally not bound — it collides with the browser
+// address bar; /clear remains available as a slash command.)
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+    e.preventDefault();
+    inputEl.focus();
+    return;
+  }
+  if (e.key === "Escape" && inFlight && !slashMenuVisible && !pendingSlashCommand) {
+    e.preventDefault();
+    abortQuery();
+  }
+});
+
 inputEl.addEventListener("input", onInputChange);
 inputEl.addEventListener("keydown", (e) => {
   // Slash menu nav takes priority when open
@@ -1051,6 +1092,15 @@ inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     sendUserMessage();
+  }
+  // ArrowUp on an empty input recalls the last sent prompt for editing
+  // and resending (standard chat UX). Only when there's nothing typed
+  // and no slash command pending, so it never fights normal cursor nav.
+  if (e.key === "ArrowUp" && !inputEl.value && !pendingSlashCommand && lastSentText) {
+    e.preventDefault();
+    inputEl.value = lastSentText;
+    inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+    onInputChange();
   }
   if (e.key === "Escape" && pendingSlashCommand) {
     e.preventDefault();
