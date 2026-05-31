@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.22.4 — 2026-05-31
+
+### Fixed
+
+- **"Live" sessions now resume in the chat** — picking a running local
+  session from the ⇄ Live menu opened it in the terminal (CLI panel); it
+  now replays the transcript and continues in the chat window (switching
+  to the chat layout if needed), like the Resume button.
+- **Chat results horizontal overflow** — wide content (code blocks, long
+  URLs, tables) no longer forces the message area wider than its
+  container; messages get `min-width:0` and code blocks scroll inside
+  the bubble (fixes layout glitches on window resize).
+
 ## 0.22.3 — 2026-05-31
 
 ### Fixed
