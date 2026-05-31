@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.21.1 — 2026-05-31
+
+### Changed — "Remote" button is now "Live sessions"
+
+The v0.21.0 Remote button was confusing: it reused Resume's past-session
+list, and there's no way for the local CLI to enumerate or attach to
+remote sessions running in the cloud / on a server (`claude
+remote-control` is host-only; that registry lives on Anthropic's relay,
+reachable only from claude.ai/code + the mobile app).
+
+The meta-bar button is now **"⇄ Live"**: it lists the claude sessions
+currently running on this machine (`claude agents --json` — dir, status,
+pid, age) and jumps into the picked one in the CLI panel via
+`claude --resume <id>`. Clear split from Resume (past conversations) vs
+Live (currently-running sessions).
+
 ## 0.21.0 — 2026-05-31
 
 ### CLI panel — never get stranded
