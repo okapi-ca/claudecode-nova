@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.20.0 — 2026-05-31
+
+### Fixed — chat (CLI mode) could not modify files
+
+When the chat runs in **CLI fallback mode** (no Anthropic API key — using
+your Claude Pro/Max session), it spawns `claude -p … --output-format
+stream-json`. In non-interactive `-p` mode, Claude Code's default
+permission mode is effectively read-only: file-edit prompts can't be
+answered, so `Write` / `Edit` were silently denied. The chat could read
+files and answer questions but **never modify anything** — the model
+would describe a change that never landed.
+
+The CLI driver now passes `--permission-mode` (new setting
+`claudecode.chat.cliPermissionMode`, default **`acceptEdits`**), so the
+chat can actually create and edit files. Options:
+
+- **`acceptEdits`** (default) — auto-approves file create/modify, but not
+  arbitrary shell commands.
+- **`bypassPermissions`** — also allows shell commands (most powerful,
+  least safe; equivalent to `--dangerously-skip-permissions`).
+- **`default`** — preserves the previous read-only behaviour for users
+  who want the chat to stay consultative.
+
+**SDK mode (with an API key) was not affected** — it pre-approves the
+Nova MCP tools via `allowedTools`, so file modifications already worked
+there. This fix is specific to the no-API-key CLI path.
+
 ## 0.19.1 — 2026-05-30
 
 ### Fixed — two v0.19.0 audit follow-ups
