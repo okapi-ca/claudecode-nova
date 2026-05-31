@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.22.3 — 2026-05-31
+
+### Fixed
+
+- **Window-resize glitches** — the terminal was re-fit on every resize
+  event, including while its panel was hidden (a zero-size panel
+  corrupts xterm's grid), and without debouncing it thrashed during
+  continuous window drags. The resize handler is now debounced (120ms),
+  only fits the terminal when its panel is visible, and keeps the chat
+  pinned to the bottom across the reflow.
+
 ## 0.22.2 — 2026-05-31
 
 ### Fixed
