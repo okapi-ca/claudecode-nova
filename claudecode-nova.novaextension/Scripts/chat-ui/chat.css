@@ -474,9 +474,9 @@ body {
 }
 .meta-btn:hover { color: var(--text); border-color: var(--accent); }
 /* The first item of the right-aligned group absorbs the slack, so
-   Remote + Resume + the toggle group cleanly at the right with the
-   toggle ending far right. */
-#remote-control { margin-left: auto; }
+   Export + Remote + Resume + the toggle group cleanly at the right
+   with the toggle ending far right. */
+#export-md { margin-left: auto; }
 
 /* ── scrollbar ──────────────────────────────────────────────────── */
 
@@ -1025,7 +1025,29 @@ body {
   min-height: 0;
   flex: 1;
   overflow: hidden;
+  position: relative; /* anchor the floating "Jump to latest" button */
 }
+
+/* Floating "↓ Latest" — shown only when the user has scrolled up while
+   new content streams in. Sits just above the composer, centered. */
+.jump-latest {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 96px;
+  z-index: 15;
+  background: var(--accent);
+  color: #15151a;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: 14px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+  cursor: pointer;
+}
+.jump-latest:hover { background: #9bb5ff; }
 
 .panels--split .chat-panel,
 .panels--split .terminal {

@@ -358,7 +358,7 @@ function appendUserMessage(text) {
   wrap.querySelector(".msg__body").textContent = text;
   chatEl.appendChild(wrap);
   addMessageActions(wrap);
-  scrollToBottom();
+  scrollToBottom(true); // sending a message always jumps to the bottom
 }
 
 function ensureAssistantBubble() {
@@ -612,8 +612,39 @@ function appendErrorMessage(text) {
   scrollToBottom();
 }
 
-function scrollToBottom() {
+// Auto-scroll that respects manual scroll-up. While the user is pinned
+// to the bottom, new content scrolls into view; once they scroll up,
+// streaming no longer yanks them down — a floating "↓ Latest" button
+// appears instead. Pass force=true (e.g. when the user sends a message)
+// to always jump down and re-pin.
+let pinnedToBottom = true;
+const jumpLatestBtn = document.getElementById("jump-latest");
+
+function isNearBottom() {
+  return chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 48;
+}
+
+function scrollToBottom(force) {
+  if (force) pinnedToBottom = true;
+  if (!pinnedToBottom) {
+    if (jumpLatestBtn) jumpLatestBtn.hidden = false;
+    return;
+  }
   chatEl.scrollTop = chatEl.scrollHeight;
+  if (jumpLatestBtn) jumpLatestBtn.hidden = true;
+}
+
+chatEl.addEventListener("scroll", () => {
+  pinnedToBottom = isNearBottom();
+  if (jumpLatestBtn && pinnedToBottom) jumpLatestBtn.hidden = true;
+});
+
+if (jumpLatestBtn) {
+  jumpLatestBtn.addEventListener("click", () => {
+    pinnedToBottom = true;
+    chatEl.scrollTop = chatEl.scrollHeight;
+    jumpLatestBtn.hidden = true;
+  });
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────
@@ -756,6 +787,17 @@ function handleServerMessage(msg) {
       // something else in extension settings. Don't fire `change`.
       if (msg.model && modelPicker) {
         modelPicker.value = stripModelSuffix(msg.model);
+      }
+      // Apply the user's persisted model choice over the backend default.
+      {
+        const savedModel = uiPrefGet("model");
+        if (savedModel && modelPicker && savedModel !== modelPicker.value) {
+          modelPicker.value = savedModel;
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "set_model", model: savedModel }));
+          }
+          chatStatus.model = savedModel;
+        }
       }
       if (msg.mode) chatStatus.mode = msg.mode;
       if (msg.model) chatStatus.model = stripModelSuffix(msg.model);
@@ -1100,6 +1142,16 @@ let pendingSessionsFor = null;
 // CLI panel with --remote-control (drivable from claude.ai/code + mobile).
 let resumeMenuAction = "chat";
 
+// ── UI preference persistence (localStorage) ──────────────────────
+// Layout, model, auto-inject toggle, and the Both-mode splitter ratio
+// survive reloads. Same lenient try/catch pattern as the cost tracker.
+function uiPrefGet(key) {
+  try { return localStorage.getItem("claudecode_ui_" + key); } catch (e) { return null; }
+}
+function uiPrefSet(key, val) {
+  try { localStorage.setItem("claudecode_ui_" + key, String(val)); } catch (e) { /* ignore */ }
+}
+
 // Pick the xterm.js theme object matching the current data-theme
 // attribute on <html>. Re-called whenever the page theme changes.
 function currentTerminalTheme() {
@@ -1249,6 +1301,10 @@ if (splitterEl) {
     dragging = false;
     splitterEl.classList.remove("dragging");
     document.body.style.userSelect = "";
+    // Persist the split ratio so Both mode restores it next time.
+    const totalH = panelsEl.getBoundingClientRect().height;
+    const termH = termPanel.getBoundingClientRect().height;
+    if (totalH > 0) uiPrefSet("splitPct", ((termH / totalH) * 100).toFixed(1));
     // Final resize signal to the PTY
     if (termInstance && termWs && termWs.readyState === WebSocket.OPEN) {
       termWs.send(JSON.stringify({ type: "resize", cols: termInstance.cols, rows: termInstance.rows }));
@@ -1284,7 +1340,14 @@ function setLayout(mode) {
     if (splitterEl) splitterEl.hidden = false;
     panelsEl.classList.add("panels--split");
     ensureTerminal();
+    // Restore the saved split ratio (overrides the flex reset above).
+    const savedPct = parseFloat(uiPrefGet("splitPct"));
+    if (!isNaN(savedPct)) {
+      termPanel.style.flex = `0 0 ${savedPct}%`;
+      chatPanel.style.flex = "1 1 auto";
+    }
   }
+  uiPrefSet("layout", mode);
   for (const k of Object.keys(layoutBtns)) {
     layoutBtns[k]?.classList.toggle("active", k === mode);
   }
@@ -1402,6 +1465,7 @@ document.addEventListener("mousedown", (e) => {
 
 if (modelPicker) {
   modelPicker.addEventListener("change", () => {
+    uiPrefSet("model", modelPicker.value);
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: "set_model", model: modelPicker.value }));
     chatStatus.model = modelPicker.value;
@@ -1502,6 +1566,54 @@ function startRemoteControl(sessionId, preview) {
 
 const remoteBtn = document.getElementById("remote-control");
 if (remoteBtn) remoteBtn.addEventListener("click", () => openSessionMenu("remote"));
+
+// ── export conversation to Markdown ───────────────────────────────
+// Serializes the visible transcript (user/assistant messages + a
+// compact note for each tool call) and downloads it as a .md file.
+function buildConversationMarkdown() {
+  const lines = [];
+  lines.push("# Claude Code — Nova chat export");
+  lines.push("");
+  lines.push(`_Exported ${new Date().toLocaleString()}_`);
+  if (currentSessionId) lines.push(`Session: \`${currentSessionId}\``);
+  lines.push("");
+  for (const el of chatEl.children) {
+    if (el.classList.contains("msg")) {
+      const body = el.querySelector(".msg__body");
+      if (!body) continue;
+      const who = el.classList.contains("msg--user") ? "You" : "Claude";
+      lines.push(`## ${who}`, "", body.innerText.trim(), "");
+    } else if (el.classList.contains("tool")) {
+      const name = el.querySelector(".tool__name")?.textContent?.trim() || "tool";
+      lines.push(`> tool: ${name}`, "");
+    } else if (el.classList.contains("error-msg")) {
+      lines.push(`> error: ${el.innerText.trim()}`, "");
+    }
+  }
+  return lines.join("\n");
+}
+
+function exportConversation() {
+  const md = buildConversationMarkdown();
+  try {
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `claude-chat-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    // Fallback for environments where anchor-download is blocked:
+    // drop the markdown on the clipboard instead.
+    navigator.clipboard?.writeText(md);
+  }
+}
+
+const exportBtn = document.getElementById("export-md");
+if (exportBtn) exportBtn.addEventListener("click", exportConversation);
 
 // Close the resume menu when clicking outside.
 document.addEventListener("mousedown", (e) => {
@@ -1605,6 +1717,19 @@ window.addEventListener("load", () => {
   // running cost from previous sessions today, even before sending the
   // first message.
   renderCostMeta(null, null);
+
+  // Restore persisted UI prefs. Model is restored here visually; the
+  // backend is re-told on session_started. Inject toggle + layout too.
+  const savedModel = uiPrefGet("model");
+  if (savedModel && modelPicker) modelPicker.value = savedModel;
+  if (injectCtxEl) {
+    const savedInject = uiPrefGet("inject");
+    if (savedInject !== null) injectCtxEl.checked = savedInject === "1";
+    injectCtxEl.addEventListener("change", () => uiPrefSet("inject", injectCtxEl.checked ? "1" : "0"));
+  }
+  const savedLayout = uiPrefGet("layout");
+  if (savedLayout === "cli" || savedLayout === "both") setLayout(savedLayout);
+
   // Wait for marked + hljs to be available
   const tryStart = () => {
     if (setupMarked() && typeof hljs !== "undefined") {

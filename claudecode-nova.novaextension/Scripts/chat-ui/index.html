@@ -53,6 +53,8 @@
         </div>
       </main>
 
+      <button id="jump-latest" class="jump-latest" hidden title="Jump to the latest message">↓ Latest</button>
+
       <footer class="composer">
         <div class="composer__meta" id="meta">
           <span class="composer__status" id="composer-status" title="Claude activity">
@@ -71,6 +73,7 @@
               <option value="claude-opus-4-8">Opus 4.8 (1M)</option>
             </select>
           </label>
+          <button id="export-md" class="meta-btn" title="Export this conversation as a Markdown file">⤓ Export</button>
           <button id="remote-control" class="meta-btn" title="Launch a session in the CLI panel with Remote Control (drive it from claude.ai/code or the Claude mobile app)">⇄ Remote</button>
           <button id="resume" class="meta-btn" title="Resume a previous session">⏱ Resume…</button>
           <label class="composer__toggle" title="Prepend your current file + selection to every prompt">
