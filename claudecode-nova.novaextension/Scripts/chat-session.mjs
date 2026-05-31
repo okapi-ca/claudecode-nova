@@ -658,12 +658,37 @@ export async function init(opts) {
   });
 
   // ── Start listening ───────────────────────────────────────────
+  // Retry on EADDRINUSE: a stale chat server from a previous Nova
+  // session can still be holding the port for a second or two after
+  // Nova relaunches. Rather than giving up (which left the chat dead
+  // until a manual "Restart Bridge"), retry the bind a few times.
   await new Promise((resolve, reject) => {
-    httpServer.once("error", reject);
-    httpServer.listen(port, "127.0.0.1", () => {
-      log("info", `chat server listening on http://127.0.0.1:${port}/`);
-      resolve();
-    });
+    const MAX_ATTEMPTS = 8;     // ~8 × 750ms ≈ 6s total
+    const RETRY_DELAY_MS = 750;
+    let attempts = 0;
+
+    const onError = (err) => {
+      if (err && err.code === "EADDRINUSE" && attempts < MAX_ATTEMPTS) {
+        attempts++;
+        log("warn", `chat: port ${port} busy (EADDRINUSE) — retry ${attempts}/${MAX_ATTEMPTS} in ${RETRY_DELAY_MS}ms`);
+        setTimeout(tryListen, RETRY_DELAY_MS);
+        return;
+      }
+      reject(err);
+    };
+
+    const tryListen = () => {
+      httpServer.removeListener("error", onError);
+      httpServer.once("error", onError);
+      httpServer.listen(port, "127.0.0.1", () => {
+        httpServer.removeListener("error", onError);
+        log("info", `chat server listening on http://127.0.0.1:${port}/` +
+          (attempts ? ` (after ${attempts} retr${attempts === 1 ? "y" : "ies"})` : ""));
+        resolve();
+      });
+    };
+
+    tryListen();
   });
 
   return {
