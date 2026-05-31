@@ -1124,8 +1124,12 @@ body {
   flex: 1;
   min-height: 0;
   margin: 10px;
-  border: 1px solid var(--border); /* visible inner box, like Claude's TUI box */
+  border: 1px solid var(--surface-card); /* contour blends with the surface */
   border-radius: 10px;
+  box-shadow: 0 1px 10px rgba(0, 0, 0, 0.28); /* float via shadow, not a line */
+}
+[data-theme="light"] .chat-panel > .chat {
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.08);
 }
 
 .chat-panel > .composer {
@@ -1195,7 +1199,7 @@ body {
 .terminal {
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid var(--surface-desk); /* outer contour blends into the desk */
+  border: 1px solid var(--border);
   box-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
 }
 [data-theme="light"] .chat-panel,
