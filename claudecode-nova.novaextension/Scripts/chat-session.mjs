@@ -442,6 +442,37 @@ export async function init(opts) {
         return;
       }
 
+      if (msg.type === "list_live_sessions") {
+        // Enumerate live claude sessions running on THIS machine via
+        // `claude agents --json` (pid / cwd / status / sessionId). Lets
+        // the user jump into another running session from the CLI panel.
+        try {
+          const bin = claudePath || "claude";
+          const env = { ...process.env };
+          if (!bin.startsWith("/")) {
+            const home = process.env.HOME || "";
+            const extra = [`${home}/.local/bin`, "/usr/local/bin", "/opt/homebrew/bin"];
+            env.PATH = [...new Set([...extra, ...(env.PATH || "").split(":")])].filter(Boolean).join(":");
+          }
+          const child = spawn(bin, ["agents", "--json"], { env });
+          let out = "";
+          child.stdout.on("data", (c) => { out += c.toString("utf8"); });
+          child.on("close", () => {
+            let sessions = [];
+            try { sessions = JSON.parse(out); } catch (_) {}
+            if (!Array.isArray(sessions)) sessions = [];
+            send({ type: "live_sessions", sessions });
+          });
+          child.on("error", (e) => {
+            log("warn", `chat: agents --json failed: ${e.message}`);
+            send({ type: "live_sessions", sessions: [] });
+          });
+        } catch (err) {
+          send({ type: "live_sessions", sessions: [] });
+        }
+        return;
+      }
+
       if (msg.type === "resume_session" && typeof msg.sessionId === "string") {
         // Mark this session as the one to attach to on the next
         // user_message. The CLI driver passes --resume <id>; the SDK

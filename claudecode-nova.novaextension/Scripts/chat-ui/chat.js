@@ -683,6 +683,10 @@ function handleServerMessage(msg) {
       pendingSessionsFor = null;
       break;
 
+    case "live_sessions":
+      showLiveSessionsMenu(msg.sessions || []);
+      break;
+
     case "resume_external":
       // The Nova sidebar's action panel told us to resume this
       // session. Reuse the same in-chat resume flow (which triggers
@@ -1137,11 +1141,6 @@ let termWs = null;
 // Both share the one chat WebSocket, so we tag the request to dispatch
 // the single "sessions" reply to the right place.
 let pendingSessionsFor = null;
-// What the composer's session menu does on pick: "chat" resumes the
-// conversation in-place; "remote" launches the picked session in the
-// CLI panel with --remote-control (drivable from claude.ai/code + mobile).
-let resumeMenuAction = "chat";
-
 // ── UI preference persistence (localStorage) ──────────────────────
 // Layout, model, auto-inject toggle, and the Both-mode splitter ratio
 // survive reloads. Same lenient try/catch pattern as the cost tracker.
@@ -1210,15 +1209,11 @@ function ensureTerminal() {
   return termInstance;
 }
 
-function connectTerminalWs(sessionIdToResume, remoteControl) {
+function connectTerminalWs(sessionIdToResume) {
   if (termWs) return;
   // Reconnecting with ?session=<id> tells cli-session to spawn the
-  // PTY with --resume <id>; ?remote=1 adds --remote-control so the
-  // session pairs with claude.ai/code + the mobile app.
-  const params = [];
-  if (sessionIdToResume) params.push(`session=${encodeURIComponent(sessionIdToResume)}`);
-  if (remoteControl) params.push("remote=1");
-  const qs = params.length ? `?${params.join("&")}` : "";
+  // PTY with --resume <id>. Used by the resume flows.
+  const qs = sessionIdToResume ? `?session=${encodeURIComponent(sessionIdToResume)}` : "";
   const url = `ws://${location.host}/cli${qs}`;
   termWs = new WebSocket(url);
   // Capture this socket so handlers can tell whether they belong to the
@@ -1495,11 +1490,7 @@ function showResumeMenu(sessions) {
     resumeMenu.querySelectorAll(".resume-menu__item").forEach((el) => {
       el.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        const sid = el.dataset.sid;
-        const preview = el.querySelector(".resume-menu__preview")?.textContent || "";
-        // Dispatch on which button opened the menu.
-        if (resumeMenuAction === "remote") startRemoteControl(sid, preview);
-        else pickResumeSession(sid, preview);
+        pickResumeSession(el.dataset.sid, el.querySelector(".resume-menu__preview")?.textContent || "");
       });
     });
   }
@@ -1533,13 +1524,10 @@ function relativeTimeShort(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-// Open the composer session menu for a given action ("chat" = resume
-// the conversation, "remote" = launch in the CLI panel with remote
-// control). Both reuse the same list_sessions request + menu.
-function openSessionMenu(action) {
+// Open the composer session menu to resume a past conversation in-place.
+function openSessionMenu() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (resumeMenu && !resumeMenu.hidden) { hideResumeMenu(); return; }
-  resumeMenuAction = action;
   pendingSessionsFor = "chat"; // routes the reply to showResumeMenu()
   ws.send(JSON.stringify({ type: "list_sessions" }));
   if (resumeMenu) {
@@ -1548,24 +1536,72 @@ function openSessionMenu(action) {
   }
 }
 
-if (resumeBtn) resumeBtn.addEventListener("click", () => openSessionMenu("chat"));
+if (resumeBtn) resumeBtn.addEventListener("click", () => openSessionMenu());
 
-// Remote-control: launch a past session in the CLI panel with
-// --remote-control so it can be driven from claude.ai/code + mobile.
-function startRemoteControl(sessionId, preview) {
+// Remote sessions (running in the cloud / on a server via
+// `claude remote-control`) are listed and joined from claude.ai/code —
+// the local CLI has no command to enumerate or attach to them. So the
+// Remote button just opens that client. Falls back to copying the URL
+// when the popup is blocked (common inside Nova's WebKit Preview).
+const liveBtn = document.getElementById("remote-control");
+
+// Live sessions — list the claude sessions currently running on THIS
+// machine (`claude agents --json`, via the chat backend) and jump into
+// the picked one in the CLI panel with `claude --resume <id>`.
+function showLiveSessionsMenu(sessions) {
+  if (!resumeMenu) return;
+  if (!sessions || sessions.length === 0) {
+    resumeMenu.innerHTML = `<div class="resume-menu__empty">No live claude sessions running on this machine.</div>`;
+  } else {
+    resumeMenu.innerHTML = sessions.map((s) => {
+      const sid = s.sessionId || "";
+      const dir = s.cwd ? s.cwd.split("/").pop() : "?";
+      const status = s.status || "";
+      const started = s.startedAt ? relativeTimeShort(s.startedAt) : "";
+      return `
+      <button class="resume-menu__item" data-sid="${sid}" title="${escapeHtml(s.cwd || sid)}">
+        <span class="resume-menu__preview">${escapeHtml(dir)}${status ? ` · ${escapeHtml(status)}` : ""}</span>
+        <span class="resume-menu__meta">
+          <span class="resume-menu__sid">${escapeHtml(sid)}</span>
+          <span>${escapeHtml(started)}${s.pid ? " · pid " + s.pid : ""}</span>
+        </span>
+      </button>`;
+    }).join("");
+    resumeMenu.querySelectorAll(".resume-menu__item").forEach((el) => {
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        attachLiveSession(el.dataset.sid);
+      });
+    });
+  }
+  resumeMenu.hidden = false;
+}
+
+// Jump into a running session: open the CLI panel and resume it there.
+function attachLiveSession(sessionId) {
   hideResumeMenu();
+  if (!sessionId) return;
   if (panelsEl && termPanel.hidden) setLayout("cli");
   ensureTerminal();
   if (termInstance) {
-    termInstance.write(`\r\n\x1b[36m[remote control${sessionId ? " · resuming " + sessionId.slice(0, 8) + "…" : ""}${preview ? " — " + preview : ""}]\x1b[0m\r\n`);
+    termInstance.write(`\r\n\x1b[36m[attaching to live session ${sessionId.slice(0, 8)}…]\x1b[0m\r\n`);
     try { termInstance.clear(); } catch (_) {}
   }
   if (termWs) { try { termWs.close(); } catch (_) {} termWs = null; }
-  connectTerminalWs(sessionId, true);
+  connectTerminalWs(sessionId);
 }
 
-const remoteBtn = document.getElementById("remote-control");
-if (remoteBtn) remoteBtn.addEventListener("click", () => openSessionMenu("remote"));
+function openLiveSessions() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (resumeMenu && !resumeMenu.hidden) { hideResumeMenu(); return; }
+  ws.send(JSON.stringify({ type: "list_live_sessions" }));
+  if (resumeMenu) {
+    resumeMenu.innerHTML = `<div class="resume-menu__empty">Scanning live sessions…</div>`;
+    resumeMenu.hidden = false;
+  }
+}
+
+if (liveBtn) liveBtn.addEventListener("click", openLiveSessions);
 
 // ── export conversation to Markdown ───────────────────────────────
 // Serializes the visible transcript (user/assistant messages + a
@@ -1617,7 +1653,7 @@ if (exportBtn) exportBtn.addEventListener("click", exportConversation);
 
 // Close the resume menu when clicking outside.
 document.addEventListener("mousedown", (e) => {
-  if (resumeMenu && !resumeMenu.hidden && !resumeMenu.contains(e.target) && e.target !== resumeBtn && e.target !== remoteBtn) {
+  if (resumeMenu && !resumeMenu.hidden && !resumeMenu.contains(e.target) && e.target !== resumeBtn && e.target !== liveBtn) {
     hideResumeMenu();
   }
 });
