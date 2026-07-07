@@ -28,6 +28,59 @@ import { listSessions, streamSessionTranscript } from "./list-sessions.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CHAT_UI_DIR = join(__dirname, "chat-ui");
 
+// Fallback model list — the single source of truth for the chat model
+// picker when /v1/models is unavailable. CLI/OAuth mode has no API key,
+// so it always lands here; SDK mode also falls back if the fetch fails.
+// Keep the newest / most capable first. When a new model ships, adding
+// it here is the one manual edit that keeps CLI-mode users current.
+const FALLBACK_MODELS = [
+  { id: "claude-opus-4-8",   label: "Opus 4.8 (1M)" },
+  { id: "claude-sonnet-5",   label: "Sonnet 5" },
+  { id: "claude-fable-5",    label: "Fable 5" },
+  { id: "claude-opus-4-7",   label: "Opus 4.7" },
+  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+  { id: "claude-haiku-4-5",  label: "Haiku 4.5" },
+];
+
+// Ask the Anthropic API which models this key can use, so the picker
+// auto-discovers new models without a code change. SDK mode only — the
+// endpoint needs an API key, so CLI/OAuth mode keeps the fallback list.
+// Returns null on any failure so the caller keeps the fallback.
+async function fetchModels(apiKey, log) {
+  // Bound the request so a slow/offline network can't stall chat init —
+  // init() awaits this before the HTTP server starts listening.
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 3000);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/models?limit=100", {
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      signal: ac.signal,
+    });
+    if (!res.ok) {
+      log("warn", `chat: /v1/models returned ${res.status} — using fallback model list`);
+      return null;
+    }
+    const body = await res.json();
+    const rows = Array.isArray(body?.data) ? body.data : [];
+    const models = rows
+      .filter((m) => typeof m?.id === "string" && m.id.startsWith("claude-"))
+      .map((m) => ({
+        id: m.id,
+        label: (m.display_name || m.id).replace(/^Claude\s+/, ""),
+      }));
+    return models.length ? models : null;
+  } catch (err) {
+    const why = err.name === "AbortError" ? "timed out" : err.message;
+    log("warn", `chat: failed to fetch model list: ${why} — using fallback`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js":   "application/javascript; charset=utf-8",
@@ -73,6 +126,14 @@ export async function init(opts) {
   } else {
     log("info", "chat: no API key — falling back to CLI subprocess mode (uses Claude Code session auth)");
   }
+
+  // Model list that feeds the chat UI's picker. SDK mode asks the API so
+  // the picker auto-discovers new models; CLI/OAuth mode has no key and
+  // keeps the curated fallback list. Computed once — the same list is
+  // pushed to every client in its `config` message.
+  const availableModels =
+    (chatMode === "sdk" ? await fetchModels(apiKey, log) : null) || FALLBACK_MODELS;
+  log("info", `chat: ${availableModels.length} models offered to the picker (${chatMode === "sdk" && availableModels !== FALLBACK_MODELS ? "discovered" : "fallback"})`);
 
   const { server: novaServer, toolNames: allowedToolNames } = buildNovaToolsServer({ callNovaTool, log });
   log("info", `chat: ${allowedToolNames.length} Nova tools exposed to SDK`);
@@ -377,6 +438,7 @@ export async function init(opts) {
     send({
       type: "config",
       defaultModel: model,
+      models: availableModels,
       mode: chatMode,
       theme: process.env.CC_CHAT_THEME || "auto",
     });

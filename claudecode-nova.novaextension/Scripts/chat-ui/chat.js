@@ -798,13 +798,22 @@ function handleServerMessage(msg) {
       // the model picker, mode badge, and theme override so they
       // reflect the backend's actual default before any session_started
       // event arrives.
-      if (msg.defaultModel && modelPicker) {
-        modelPicker.value = stripModelSuffix(msg.defaultModel);
+      //
+      // Rebuild the picker from the server's list first (source of truth),
+      // then select the saved pref if it survives, else the backend default.
+      // selectModelValue tolerates alias↔dated-id drift.
+      if (Array.isArray(msg.models)) populateModelPicker(msg.models);
+      {
+        const saved = uiPrefGet("model");
+        const resolved =
+          (saved && selectModelValue(saved)) ||
+          (msg.defaultModel && selectModelValue(msg.defaultModel));
+        if (resolved) chatStatus.model = resolved;
+        else if (msg.defaultModel) chatStatus.model = stripModelSuffix(msg.defaultModel);
       }
       applyModeBadge(msg.mode);
       applyTheme(msg.theme);
       if (msg.mode) chatStatus.mode = msg.mode;
-      if (msg.defaultModel) chatStatus.model = stripModelSuffix(msg.defaultModel);
       renderChatStatus();
       break;
 
@@ -822,22 +831,23 @@ function handleServerMessage(msg) {
       // Sync the picker to the model the backend actually started with —
       // it may differ from the picker's default if the user configured
       // something else in extension settings. Don't fire `change`.
-      if (msg.model && modelPicker) {
-        modelPicker.value = stripModelSuffix(msg.model);
-      }
-      // Apply the user's persisted model choice over the backend default.
+      // selectModelValue tolerates the dated ids the init event can carry.
       {
+        const backendVal = msg.model ? selectModelValue(msg.model) : null;
+        // Apply the user's persisted model choice over the backend default.
         const savedModel = uiPrefGet("model");
-        if (savedModel && modelPicker && savedModel !== modelPicker.value) {
-          modelPicker.value = savedModel;
+        const savedVal = savedModel ? selectModelValue(savedModel) : null;
+        if (savedVal && savedVal !== backendVal) {
           if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "set_model", model: savedModel }));
+            ws.send(JSON.stringify({ type: "set_model", model: savedVal }));
           }
-          chatStatus.model = savedModel;
         }
+        // Keep chatStatus.model in step with whatever the picker now shows.
+        const shown = modelPicker ? modelPicker.value : null;
+        if (shown) chatStatus.model = shown;
+        else if (msg.model) chatStatus.model = stripModelSuffix(msg.model);
       }
       if (msg.mode) chatStatus.mode = msg.mode;
-      if (msg.model) chatStatus.model = stripModelSuffix(msg.model);
       renderChatStatus();
       setStatus("thinking", "Thinking…");
       break;
@@ -1810,6 +1820,45 @@ function stripModelSuffix(m) {
   return m.replace(/\[[^\]]+\]$/, "");
 }
 
+// Rebuild the model picker's <option>s from the server-supplied list
+// (config.models). The server is the source of truth — SDK mode discovers
+// models from /v1/models, CLI mode sends a curated fallback. Falls back to
+// the HTML's hardcoded options if the list is empty/missing. Preserves the
+// current selection when the same id survives the rebuild.
+function populateModelPicker(models) {
+  if (!modelPicker || !Array.isArray(models) || models.length === 0) return;
+  const prev = modelPicker.value;
+  modelPicker.textContent = "";
+  for (const m of models) {
+    if (!m || typeof m.id !== "string") continue;
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = m.label || m.id.replace(/^claude-/, "");
+    modelPicker.appendChild(opt);
+  }
+  if (prev) selectModelValue(prev);
+}
+
+// Point the picker at `value`, tolerating alias↔dated-id drift. The config
+// default / saved pref carry short aliases ("claude-opus-4-8"), while
+// SDK-discovered options may be dated ("claude-opus-4-8-20260515"). Tries
+// exact match, then a prefix match either direction. Returns the resolved
+// option value if one matched (and selects it), else null (picker unchanged).
+function selectModelValue(value) {
+  if (!modelPicker || !value) return null;
+  const want = stripModelSuffix(value);
+  const opts = Array.from(modelPicker.options);
+  const hit =
+    opts.find((o) => o.value === want) ||
+    opts.find((o) => o.value.startsWith(want + "-")) ||
+    opts.find((o) => want.startsWith(o.value + "-"));
+  if (hit) {
+    modelPicker.value = hit.value;
+    return hit.value;
+  }
+  return null;
+}
+
 // Drive the page theme via a data-theme="dark|light" attribute on
 // <html>. The CSS uses :root[data-theme="light"] / fallback to the
 // default dark for everything else. JS resolves "auto" against
@@ -1904,8 +1953,10 @@ window.addEventListener("load", () => {
 
   // Restore persisted UI prefs. Model is restored here visually; the
   // backend is re-told on session_started. Inject toggle + layout too.
+  // Visual-only restore against the HTML's hardcoded options; the `config`
+  // event replaces these with the server list and re-selects shortly after.
   const savedModel = uiPrefGet("model");
-  if (savedModel && modelPicker) modelPicker.value = savedModel;
+  if (savedModel && modelPicker) selectModelValue(savedModel);
   if (injectCtxEl) {
     const savedInject = uiPrefGet("inject");
     if (savedInject !== null) injectCtxEl.checked = savedInject === "1";
