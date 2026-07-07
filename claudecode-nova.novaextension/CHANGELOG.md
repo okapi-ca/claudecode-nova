@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.23.0 — 2026-07-07
+
+### Added
+
+- **Server-driven chat model picker** — the model dropdown is now
+  populated from the chat server instead of a hardcoded HTML list. In
+  SDK mode the server queries the Anthropic `/v1/models` endpoint so new
+  models appear automatically; CLI/OAuth mode (no API key) uses a
+  curated fallback list. The fetch is bounded by a 3s timeout so a slow
+  network never stalls chat startup. Default/saved model selection now
+  tolerates alias↔dated-id drift (e.g. `claude-opus-4-8` matches
+  `claude-opus-4-8-20260515`).
+
 ## 0.22.6 — 2026-05-31
 
 ### Changed
