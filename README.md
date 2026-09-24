@@ -268,7 +268,18 @@ claudecode-nova.novaextension/
 ├── extension.json              # Manifest (commands, sidebar, config)
 ├── main.js                     # (kept in sync with Scripts/main.js — Nova loader quirk)
 ├── Scripts/
-│   ├── main.js                 # Extension entry point — Nova APIs ↔ subprocesses
+│   ├── main.js                 # Extension entry point — registers commands, wires the modules below
+│   ├── state.js                # Shared mutable extension state (`S`)
+│   ├── registry.js             # Shared namespace the modules attach to (`R.Bridge`, `R.Tools`, …)
+│   ├── bridge.js               # ws-server.js lifecycle + stdin/stdout JSON-lines protocol
+│   ├── tools.js                # MCP tool handlers mapped onto Nova APIs
+│   ├── sidebar.js              # Sidebar tree providers, diff Accept/Reject, sessions, git branch
+│   ├── activity.js             # Activity / tool-call log + persistence to activity.json
+│   ├── selection.js            # Selection tracking, Send Selection / Add File
+│   ├── chat.js                 # Chat helpers — API key resolution, access token, Open Chat
+│   ├── launch.js               # Launch Claude Code in an external terminal
+│   ├── updates.js              # Claude Code CLI version check + update / install flows
+│   ├── util.js                 # Notifications, sleep, shell quoting
 │   ├── ws-server.js            # MCP bridge (WebSocket server, Node subprocess)
 │   ├── chat-session.mjs        # Chat backend (/ws) — Agent SDK streaming-input session (API key or OAuth)
 │   ├── cli-session.mjs         # CLI panel backend (/cli) — node-pty PTY bridge

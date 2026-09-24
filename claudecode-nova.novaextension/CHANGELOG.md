@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **`main.js` split into modules.** The 3 500-line entry point is now a
+  96-line `Scripts/main.js` that registers commands and wires nine modules
+  (`bridge`, `tools`, `sidebar`, `activity`, `selection`, `chat`, `launch`,
+  `updates`, `util`) around a shared `state.js` and a `registry.js`
+  namespace, since Nova's `require()` cannot handle circular imports. No
+  behaviour change; same functions, same commands.
+
 ## 0.27.0 — 2026-09-24
 
 ### Changed
