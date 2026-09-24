@@ -61,6 +61,10 @@ if (!fs.existsSync(mainFile)) {
 const requiredScripts = [
   "Scripts/ws-server.js",
   "Scripts/call-bridge.js",
+  "Scripts/chat-session.mjs",
+  "Scripts/cli-session.mjs",
+  "Scripts/ws-auth.mjs",
+  "Scripts/prune-deps.mjs",
 ];
 for (const rel of requiredScripts) {
   if (!fs.existsSync(path.join(extDir, rel))) {
@@ -83,6 +87,48 @@ if (!m) {
 if (m[1] !== manifest.version) {
   fail("version drift — extension.json says " + manifest.version +
        " but the latest CHANGELOG entry is " + m[1]);
+}
+
+// Bundle hygiene — only when node_modules is present (local / pre-publish;
+// CI checks out the repo without it). Nova ships the directory as-is, so
+// anything left here goes to every user. Scripts/prune-deps.mjs (npm
+// postinstall) is supposed to have removed all of this.
+const nm = path.join(extDir, "Scripts", "node_modules");
+if (fs.existsSync(nm)) {
+  const problems = [];
+  const anthropicDir = path.join(nm, "@anthropic-ai");
+  if (fs.existsSync(anthropicDir)) {
+    for (const d of fs.readdirSync(anthropicDir)) {
+      if (d.startsWith("claude-agent-sdk-")) problems.push("vendored Claude Code binary still present: @anthropic-ai/" + d + " (~214 MB)");
+    }
+  }
+  if (fs.existsSync(path.join(nm, ".bin"))) problems.push("node_modules/.bin present (symlinks break `nova extension validate`)");
+  const prebuilds = path.join(nm, "node-pty", "prebuilds");
+  if (fs.existsSync(prebuilds)) {
+    for (const d of fs.readdirSync(prebuilds)) if (d !== "darwin-arm64") problems.push("node-pty prebuild for another platform: " + d);
+  }
+  for (const rel of ["node-pty/third_party", "node-pty/deps", "zod/src"]) {
+    if (fs.existsSync(path.join(nm, rel))) problems.push("build-time tree still present: " + rel);
+  }
+  // Sample the file-level sweep: any .map or .d.ts left means prune didn't run.
+  let stray = 0;
+  (function walk(dir, depth) {
+    if (depth > 6 || stray > 0) return;
+    let entries; try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p, depth + 1);
+      else if (/\.(map|d\.ts)$/.test(e.name)) { stray++; problems.push("unpruned file: " + path.relative(nm, p)); return; }
+    }
+  })(nm, 0);
+  if (problems.length) {
+    fail("Scripts/node_modules is not pruned — run `cd claudecode-nova.novaextension/Scripts && node prune-deps.mjs`:\n  - " + problems.join("\n  - "));
+  }
+  const requiredDeps = ["@anthropic-ai/claude-agent-sdk/sdk.mjs", "ws/package.json", "zod/package.json", "node-pty/lib/index.js", "node-pty/prebuilds/darwin-arm64/spawn-helper"];
+  for (const rel of requiredDeps) {
+    if (!fs.existsSync(path.join(nm, rel))) fail("runtime dependency missing after prune: " + rel);
+  }
+  console.log("PASS: Scripts/node_modules is pruned (no vendored claude binary, no .bin, darwin-arm64 only)");
 }
 
 console.log("PASS: extension.json valid, version " + manifest.version + " matches CHANGELOG");

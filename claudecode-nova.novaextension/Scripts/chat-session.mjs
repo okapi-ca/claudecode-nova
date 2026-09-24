@@ -292,9 +292,15 @@ export async function init(opts) {
     return null;
   }
   const claudeExe = resolveClaudeExecutable();
-  log("info", claudeExe
-    ? `chat: Claude Code executable ${claudeExe}`
-    : `chat: "${claudePath || "claude"}" not found on PATH — using the SDK's bundled Claude Code`);
+  // No fallback: since v0.26.0 the bundle no longer ships the SDK's vendored
+  // Claude Code binary (it was 214 MB of the 250 MB extension). The chat,
+  // like the bridge and the terminal panel, needs the user's own install.
+  const CLAUDE_MISSING_MSG =
+    `Claude Code CLI not found ("${claudePath || "claude"}" is not on PATH). ` +
+    "Install it (https://docs.anthropic.com/en/docs/claude-code) or point the " +
+    "\"Claude CLI command\" project setting at the binary, then restart the bridge.";
+  if (claudeExe) log("info", `chat: Claude Code executable ${claudeExe}`);
+  else log("error", `chat: ${CLAUDE_MISSING_MSG}`);
 
   // Environment for the spawned process: inherit ours, but never let it
   // believe it is nested inside another Claude Code session (Nova may have
@@ -599,6 +605,7 @@ export async function init(opts) {
       models: availableModels,
       mode: chatMode,
       permissionMode,
+      claudeAvailable: !!claudeExe,
       theme: process.env.CC_CHAT_THEME || "auto",
     });
 
@@ -760,6 +767,11 @@ export async function init(opts) {
             { type: "text", text: prompt },
           ]
         : prompt;
+
+      if (!claudeExe) {
+        send({ type: "error", message: CLAUDE_MISSING_MSG });
+        return;
+      }
 
       // Queue the turn. If a turn is still running, the SDK processes this
       // one right after it — no "previous query still running" rejection.

@@ -94,7 +94,7 @@ Three buttons in the "Open Claude Chat" command's action panel:
 |------------|----------------|
 | [Nova](https://nova.app) | 10.0 |
 | [Node.js](https://nodejs.org) | 18.0 |
-| [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) | Latest |
+| [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) | Latest — required by the bridge, the chat and the terminal panel alike (the extension does not bundle its own copy) |
 
 ## Installation
 
@@ -102,14 +102,18 @@ Three buttons in the "Open Claude Chat" command's action panel:
 
 ```bash
 git clone https://github.com/okapi-ca/claudecode-nova.git
+(cd claudecode-nova/claudecode-nova.novaextension/Scripts && npm install)   # deps + prune (~20 MB)
 cp -r claudecode-nova/claudecode-nova.novaextension \
   ~/Library/Application\ Support/Nova/Extensions/
 ```
+
+`npm install` runs `Scripts/prune-deps.mjs` afterwards, which strips the SDK's vendored Claude Code binary (214 MB — the chat drives your own `claude`), build inputs, type declarations and source maps. Re-run it any time with `npm run prune`.
 
 ### For Development
 
 ```bash
 git clone https://github.com/okapi-ca/claudecode-nova.git
+(cd claudecode-nova/claudecode-nova.novaextension/Scripts && npm install)
 ln -s "$(pwd)/claudecode-nova/claudecode-nova.novaextension" \
   ~/Library/Application\ Support/Nova/Extensions/claudecode-nova.novaextension
 ```
@@ -275,6 +279,7 @@ claudecode-nova.novaextension/
 │   ├── version-tree-provider.js
 │   ├── update-check.js         # npm dist-tag polling for Claude Code CLI
 │   ├── call-bridge.js          # Standalone CLI client for invoking bridge tools
+│   ├── prune-deps.mjs          # npm postinstall — trims node_modules to the runtime footprint
 │   └── chat-ui/                # HTML / CSS / JS chat client (served by chat-session.mjs)
 ├── Images/                     # Sidebar + extension icons
 ├── CHANGELOG.md
