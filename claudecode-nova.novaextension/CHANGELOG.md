@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.27.0 — 2026-09-24
+
+### Changed
+
+- **The model picker asks your Claude Code which models exist.** In OAuth
+  mode the picker used to be a hand-maintained list baked into the
+  extension, which is how it shipped an id that didn't exist (fixed in
+  0.24.0) and missed new models until the next release. At chat startup
+  the server now spins up a short-lived idle session against your own
+  `claude` and calls the SDK's `supportedModels()` — the same list the
+  CLI's `/model` command shows, with aliases (`default`, `opus`, `sonnet`,
+  `haiku`) resolved to canonical ids and de-duplicated. The entry Claude
+  Code marks as default is labelled *recommended*, and each option now
+  carries Claude Code's one-line description as a tooltip. Costs about
+  0.7 s once per bridge start; nothing is sent to a model. SDK mode keeps
+  `/v1/models` first and uses the same discovery as its fallback; the
+  curated list is the last resort in both modes. `config.modelsSource`
+  (`api` / `sdk` / `fallback`) says which one you got.
+
 ## 0.26.0 — 2026-09-24
 
 ### Changed — bundle down from 250 MB to about 20 MB
