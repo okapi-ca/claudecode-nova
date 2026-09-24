@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.24.0 — 2026-09-24
+
+### Security
+
+- **Chat and terminal WebSockets now require an access token and a
+  same-origin caller.** The MCP bridge always demanded a token, but the
+  opt-in chat server accepted any loopback connection on `/ws` (chat) and
+  `/cli` (a PTY running `claude`). A WebSocket opened from a web page is
+  not subject to CORS, so any site loaded in a browser on the same Mac
+  could have reached the terminal or driven the chat in `acceptEdits`
+  mode. Both endpoints now go through `Scripts/ws-auth.mjs`: the `Host`
+  header must be this loopback server (blocks DNS rebinding), an
+  `Origin` header, when present, must be the chat's own origin (blocks
+  cross-site hijacking), and a per-install secret must be supplied as
+  `?token=…` and is compared in constant time. The token is minted once
+  by the extension, persisted in its global storage so the chat URL
+  stays stable across restarts, and embedded in every URL the
+  "Open Claude Chat in Browser" command hands out (Nova Preview wrapper,
+  browser, clipboard). A bare `http://127.0.0.1:5180/` still renders the
+  page but cannot connect. New command **Rotate Claude Chat Access
+  Token** re-mints it and restarts the bridge.
+- Unknown WebSocket upgrade paths on the chat server are now answered
+  with `404` and closed instead of being left hanging.
+
+### Fixed
+
+- **Diff reviews longer than 30 s no longer time out behind your back.**
+  `ws-server.js` applied a flat 30 s deadline to every tool call,
+  including `openDiff`, which blocks until you click Accept or Reject.
+  Past 30 s Claude was told "Tool call timed out"; your later Accept
+  still wrote the file, but the answer had nobody left to go to. The
+  deadline is now per tool: `openDiff` follows
+  `claudecode.diffTimeoutMinutes` (plus one minute of slack; `0` means no
+  deadline, as the setting already promised), `askUser` gets 10 minutes,
+  everything else keeps 30 s.
+- **Invalid model id in the CLI/OAuth fallback list.** `claude-fable-5`
+  does not exist; the list now offers `claude-fable-5-1`, adds
+  `claude-opus-5-5`, and the manifest enum gains Sonnet 5 / Fable 5.1 /
+  Opus 5.5. The default chat model moves from Sonnet 4.6 to
+  **Sonnet 5**; an explicit `claudecode.chat.model` setting is untouched.
+- The bridge's MCP `initialize` reply advertised a hardcoded
+  `version: "0.2.0"`; it now reports the extension's real version.
+
+### Changed
+
+- **The embedded `claude` processes now connect to Nova.** Neither the
+  chat's CLI/OAuth subprocess (`claude -p …`) nor the in-window terminal
+  received the two IDE variables the "Launch Claude Code" command sets,
+  so they ran without editor tools. Both now get
+  `CLAUDE_CODE_SSE_PORT` + `ENABLE_IDE_INTEGRATION=true` pointing at
+  this bridge, the same way an external terminal does.
+- `ide_connected` (the notification Claude Code sends with its own pid
+  after the handshake, as it does for the VS Code / JetBrains plugins) is
+  now recorded and logged instead of being dropped as an unknown method.
+- `claudecode.chat.enabled` and `claudecode.chat.port` descriptions no
+  longer claim an API key is required or suggest pasting a bare URL into
+  Nova's Preview URL setting.
+
+### Tests / CI
+
+- New `tests/ws-auth.test.mjs` (12 dependency-free unit checks on the
+  Host / Origin / token gate) runs in CI.
+- New `tests/chat-auth.test.js` spawns the real chat server and checks
+  every accept / reject path over HTTP and WebSocket. Needs the bundled
+  `node_modules`, so it runs locally, not in CI.
+- CI now syntax-checks every `.js` / `.mjs` under `Scripts/` (the ESM
+  chat, terminal, session and tool-wrapper modules were unchecked) and
+  fails if the root `main.js` mirror drifts from `Scripts/main.js`.
+
 ## 0.23.0 — 2026-07-07
 
 ### Added
