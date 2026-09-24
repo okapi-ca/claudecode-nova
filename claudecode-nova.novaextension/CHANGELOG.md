@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+
+- **The bridge helper no longer outlives a Nova crash.** `ws-server.js` only
+  noticed a dead parent on its next `stdout` write, so an idle helper survived
+  a Nova crash indefinitely: its `~/.claude/ide/<port>.lock` went stale and it
+  kept the chat port, so the next Nova start got `EADDRINUSE` on 5180 and the
+  chat panel failed. The helper now exits, and removes its lock, as soon as
+  its `stdin` closes or it is re-parented to `launchd` (checked every 5 s).
+
 ### Changed
 
 - **`main.js` split into modules.** The 3 500-line entry point is now a

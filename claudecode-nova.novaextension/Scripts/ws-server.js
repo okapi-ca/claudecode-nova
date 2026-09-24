@@ -103,10 +103,46 @@ function sendToNova(obj) {
 // Treat a dead parent as a shutdown signal instead.
 process.stdout.on("error", (err) => {
   if (err && (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED")) {
-    try { if (serverPort) removeLockFile(serverPort); } catch (_) {}
-    process.exit(0);
+    shutdown("stdout closed by parent");
   }
 });
+
+// ---------------------------------------------------------------------------
+// Shutdown — single exit path for SIGTERM, a closed pipe and a lost parent
+// ---------------------------------------------------------------------------
+let shuttingDown = false;
+
+function shutdown(reason) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  // Best-effort: stdout may already be gone, and log() swallows that.
+  log("info", `Shutting down (${reason})`);
+  try { if (serverPort) removeLockFile(serverPort); } catch (_) {}
+  for (const client of connectedClients) {
+    try { client.socket.destroy(); } catch (_) {}
+  }
+  if (chatHandle) {
+    try { chatHandle.stop(); } catch (_) {}
+  }
+  process.exit(0);
+}
+
+// The EPIPE handler above only fires on our *next write*. An idle server
+// never writes, so when Nova crashes (no deactivate(), no SIGTERM — seen
+// 2026-09-24 with a SIGTRAP in Nova 14.1) the helper outlived Nova
+// indefinitely: stale lock file in ~/.claude/ide, and the chat port held
+// hostage so the next Nova start got EADDRINUSE on 5180. Two cheap signals
+// catch that case without waiting for a write:
+//   1. stdin reaches EOF — the extension service's end of the pipe closed.
+//   2. We are re-parented to launchd (ppid === 1). Nova spawns us directly
+//      (no shell), so any ppid change means the extension service is gone.
+process.stdin.on("end", () => shutdown("stdin closed"));
+process.stdin.on("close", () => shutdown("stdin closed"));
+
+const PARENT_POLL_MS = 5000;
+setInterval(() => {
+  if (process.ppid === 1) shutdown("parent process exited");
+}, PARENT_POLL_MS).unref();
 
 // ---------------------------------------------------------------------------
 // Lock file management
@@ -820,20 +856,9 @@ async function startServer() {
     }
   });
 
-  // Cleanup on exit
-  function cleanup() {
-    if (serverPort) removeLockFile(serverPort);
-    for (const client of connectedClients) {
-      try { client.socket.destroy(); } catch (_) {}
-    }
-    if (chatHandle) {
-      try { chatHandle.stop(); } catch (_) {}
-    }
-    process.exit(0);
-  }
-
-  process.on("SIGTERM", cleanup);
-  process.on("SIGINT", cleanup);
+  // Cleanup on exit — shared with the lost-parent paths (see shutdown()).
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("exit", () => { if (serverPort) removeLockFile(serverPort); });
 }
 
