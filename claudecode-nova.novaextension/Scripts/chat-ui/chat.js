@@ -148,8 +148,9 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // Anthropic API hard limit
 let pendingAttachments = [];
 
 function isMultimodalAllowed() {
-  // CLI mode doesn't support images. SDK is the gate.
-  return chatStatus && chatStatus.mode === "sdk";
+  // Streaming input mode carries image blocks in both auth modes (SDK key
+  // or OAuth login) since v0.25.0 — nothing left to gate on.
+  return true;
 }
 
 function fileToBase64(file) {
@@ -542,6 +543,76 @@ function appendToolCard(name, input) {
   scrollToBottom();
 }
 
+// ── permission prompts ───────────────────────────────────────────
+// One card per pending request; buttons answer it. `allow_always`
+// applies the SDK's permission suggestions (e.g. switch the session to
+// acceptEdits) so the same class of action stops prompting.
+const permissionCards = new Map();
+
+function appendPermissionCard(req) {
+  hideEmptyState();
+  currentAssistantBubble = null;
+  currentAssistantBuffer = "";
+
+  const pretty = prettyToolName(req.toolName);
+  const summary = summarizePermissionInput(req.toolName, req.input || {});
+  const card = document.createElement("div");
+  card.className = "perm";
+  card.dataset.permId = req.id;
+  card.innerHTML = `
+    <div class="perm__header">
+      <span class="perm__icon" aria-hidden="true"></span>
+      <span class="perm__title">Allow <span class="perm__tool">${escapeHtml(pretty)}</span>?</span>
+      <span class="perm__summary">${escapeHtml(summary)}</span>
+    </div>
+    <pre class="perm__pre">${escapeHtml(JSON.stringify(req.input || {}, null, 2))}</pre>
+    <div class="perm__actions">
+      <button class="btn btn--primary perm__allow" title="Run this once">Allow</button>
+      ${req.canAlwaysAllow ? '<button class="btn btn--secondary perm__always" title="Allow and stop asking for this kind of action in this session">Always allow</button>' : ""}
+      <button class="btn btn--secondary perm__deny" title="Refuse — Claude is told you declined">Deny</button>
+    </div>
+    <div class="perm__outcome" hidden></div>
+  `;
+  card.querySelector(".perm__allow").addEventListener("click", () => answerPermission(req.id, "allow"));
+  const always = card.querySelector(".perm__always");
+  if (always) always.addEventListener("click", () => answerPermission(req.id, "allow_always"));
+  card.querySelector(".perm__deny").addEventListener("click", () => answerPermission(req.id, "deny"));
+
+  chatEl.appendChild(card);
+  permissionCards.set(req.id, card);
+  setStatus("thinking", "Waiting for your approval…");
+  scrollToBottom(true);
+}
+
+function summarizePermissionInput(toolName, input) {
+  if (typeof input.command === "string") return input.command;
+  if (typeof input.file_path === "string") return input.file_path;
+  if (typeof input.filePath === "string") return input.filePath;
+  if (typeof input.pattern === "string") return input.pattern;
+  if (typeof input.url === "string") return input.url;
+  const keys = Object.keys(input);
+  return keys.length ? JSON.stringify(input) : "(no arguments)";
+}
+
+function answerPermission(id, behavior) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: "permission_response", id, behavior }));
+  resolvePermissionCard(id, behavior);
+  setStatus("thinking", "Thinking…");
+}
+
+function resolvePermissionCard(id, behavior) {
+  const card = permissionCards.get(id);
+  if (!card) return;
+  permissionCards.delete(id);
+  card.classList.add("perm--resolved", "perm--" + behavior);
+  for (const b of card.querySelectorAll("button")) b.disabled = true;
+  const outcome = card.querySelector(".perm__outcome");
+  const label = { allow: "Allowed", allow_always: "Allowed — won't ask again this session", deny: "Denied", cancelled: "Cancelled" }[behavior] || behavior;
+  outcome.textContent = label;
+  outcome.hidden = false;
+}
+
 function attachToolResult(name, text, isError) {
   // Find the first card matching this name (FIFO matching)
   const idx = toolCardsByName.findIndex((c) => c.name === name);
@@ -880,6 +951,19 @@ function handleServerMessage(msg) {
       removePendingPlaceholder();
       if (currentThinkingBody) collapseCurrentThinking();
       appendToolCard(msg.name, msg.input);
+      break;
+
+    case "permission_request":
+      // Claude wants to run a tool the permission mode doesn't pre-approve.
+      // The turn is paused server-side until we answer.
+      removePendingPlaceholder();
+      if (currentThinkingBody) collapseCurrentThinking();
+      appendPermissionCard(msg);
+      break;
+
+    case "permission_resolved":
+      // Server-side outcome (cancelled / session closed) — reflect it.
+      resolvePermissionCard(msg.id, msg.behavior);
       break;
 
     case "tool_result":
@@ -1931,7 +2015,7 @@ function renderChatStatus() {
   const txt = document.getElementById("chat-status-text");
   if (!dot || !txt) return;
   const bits = ["Chat:"];
-  if (chatStatus.mode) bits.push(chatStatus.mode === "cli" ? "OAuth" : chatStatus.mode.toUpperCase());
+  if (chatStatus.mode) bits.push((chatStatus.mode === "oauth" || chatStatus.mode === "cli") ? "OAuth" : chatStatus.mode.toUpperCase());
   if (chatStatus.model) bits.push(chatStatus.model.replace(/^claude-/, ""));
   bits.push("port " + chatStatus.port);
   txt.textContent = bits.join(" · ");
@@ -1942,9 +2026,9 @@ function renderChatStatus() {
 // Shared between the initial `config` event and per-session updates.
 function applyModeBadge(mode) {
   if (!metaMode) return;
-  if (mode === "cli") {
+  if (mode === "oauth" || mode === "cli") {
     metaMode.textContent = "OAuth";
-    metaMode.title = "Claude Code OAuth session — covered by your Pro/Max subscription";
+    metaMode.title = "Your Claude Code login (Pro / Max / Enterprise) — usage covered by the subscription; the cost shown is the API equivalent";
     metaMode.className = "meta-mode meta-mode--cli";
     metaMode.hidden = false;
   } else if (mode === "sdk") {

@@ -256,7 +256,7 @@
       "title": "Enable Chat UI (Mode B — experimental)",
       "type": "boolean",
       "default": false,
-      "description": "Opt-in to the in-browser chat UI. With an Anthropic API key it runs on the Claude Agent SDK; without one it falls back to your Claude Code CLI login (Pro/Max/Enterprise). When enabled, a chat server starts on the configured port; use the \"Open Claude Chat in Browser\" command to open it (the URL carries a private access token). Independent from the existing CLI bridge mode."
+      "description": "Opt-in to the in-browser chat UI. Runs the Claude Agent SDK over a persistent Claude Code process: with an Anthropic API key (billed to the key, Nova tools only) or, without one, through your Claude Code login (Pro/Max/Enterprise, full toolset + your settings). When enabled, a chat server starts on the configured port; use the \"Open Claude Chat in Browser\" command to open it (the URL carries a private access token). Independent from the existing CLI bridge mode."
     },
     {
       "key": "claudecode.chat.keychainService",
@@ -323,15 +323,15 @@
     },
     {
       "key": "claudecode.chat.cliPermissionMode",
-      "title": "Chat CLI permission mode (no-API-key fallback)",
+      "title": "Chat permission mode",
       "type": "enum",
       "values": [
-        ["acceptEdits", "Accept edits — chat can create/modify files, but not run shell commands"],
-        ["bypassPermissions", "Bypass all — chat can edit files AND run shell commands (most powerful, least safe)"],
-        ["default", "Read-only — chat can read/answer but never modify files"]
+        ["acceptEdits", "Accept edits — file create/modify runs without asking; anything else asks in the chat"],
+        ["default", "Ask — every non-read-only tool call shows an Allow / Always allow / Deny card in the chat"],
+        ["bypassPermissions", "Bypass all — nothing asks, including shell commands (most powerful, least safe)"]
       ],
       "default": "acceptEdits",
-      "description": "Permission mode passed to `claude --permission-mode` when the chat runs in CLI fallback mode (no Anthropic API key — uses your Claude Pro/Max session). In non-interactive `-p` mode the default is read-only because file-edit prompts cannot be answered, so file modifications are silently denied. `acceptEdits` (recommended) auto-approves file edits. `bypassPermissions` also allows shell commands. SDK mode (with an API key) is unaffected — it pre-approves Nova tools via allowedTools."
+      "description": "How the chat's Claude Code session handles tool permissions. Prompts that aren't pre-approved appear as cards in the chat (Allow / Always allow / Deny) — the turn waits for your answer. `acceptEdits` (recommended) skips the prompt for file edits. `default` asks for everything that isn't read-only. `bypassPermissions` never asks. Applies to both auth modes; Nova editor tools are always pre-approved."
     }
   ],
 

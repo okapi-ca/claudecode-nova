@@ -624,8 +624,8 @@ async function startBridge() {
         console.log("Claude Code Bridge: chat enabled (SDK mode), port " + env.CC_CHAT_PORT + ", model " + env.CC_CHAT_MODEL);
         chatState.apiKeySource = await detectChatApiKeySource();
       } else {
-        console.log("Claude Code Bridge: chat enabled (CLI fallback — no API key), port " + env.CC_CHAT_PORT + ", model " + env.CC_CHAT_MODEL);
-        chatState.apiKeySource = "claude-cli";
+        console.log("Claude Code Bridge: chat enabled (OAuth mode — no API key, uses your Claude Code login), port " + env.CC_CHAT_PORT + ", model " + env.CC_CHAT_MODEL);
+        chatState.apiKeySource = "oauth";
       }
 
       chatState.state = "starting";

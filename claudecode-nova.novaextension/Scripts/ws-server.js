@@ -97,6 +97,17 @@ function sendToNova(obj) {
   } catch (_) { /* stdout closed */ }
 }
 
+// stdout is our pipe to main.js. If Nova (or a test harness) goes away
+// first, later writes raise EPIPE asynchronously on the stream — which is
+// not caught by the try/catch above and would crash us with a stack trace.
+// Treat a dead parent as a shutdown signal instead.
+process.stdout.on("error", (err) => {
+  if (err && (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED")) {
+    try { if (serverPort) removeLockFile(serverPort); } catch (_) {}
+    process.exit(0);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Lock file management
 // ---------------------------------------------------------------------------

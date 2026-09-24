@@ -3,8 +3,21 @@
 // Loaded by ws-server.js when claudecode.chat.enabled is on. Spawns an HTTP
 // server (fixed port, configurable) that serves the chat UI assets in
 // ./chat-ui/ and exposes a WebSocket /ws endpoint. Drives Claude via the
-// Claude Agent SDK with in-process tool wrappers that round-trip Nova calls
-// through ws-server.js → main.js → editor.
+// Claude Agent SDK in *streaming input* mode: one persistent Claude Code
+// process per chat session, fed through an async generator, so follow-up
+// turns don't pay a cold start, permission prompts reach the chat through
+// the SDK control channel, Stop interrupts the current turn instead of
+// killing the session, and images work in both auth modes.
+//
+// Two auth modes, same driver :
+//   - "sdk"   : an Anthropic API key was resolved. Cost-tuned: no built-in
+//               Claude Code tools (tools: []), no settings, Nova tools only.
+//   - "oauth" : no key. The SDK drives the user's own `claude` binary, which
+//               authenticates with their Claude Code login (Pro / Max /
+//               Enterprise). Full Claude Code toolset + user/project settings
+//               (skills, hooks, plugins) so it behaves like their terminal.
+// In-process Nova tool wrappers round-trip editor calls through
+// ws-server.js → main.js → Nova in both modes.
 //
 // Lifecycle :
 //   1. ws-server.js calls init({ port, apiKey, callNovaTool, log })
@@ -17,6 +30,7 @@
 
 import { createServer } from "http";
 import { readFile } from "fs/promises";
+import { existsSync, realpathSync } from "fs";
 import { spawn } from "child_process";
 import { dirname, extname, join } from "path";
 import { fileURLToPath } from "url";
@@ -115,21 +129,23 @@ export async function init(opts) {
   // user can A/B between Sonnet and Opus mid-conversation.
   let model = initialModel;
 
-  // Two execution modes :
-  //   - "sdk" : use @anthropic-ai/claude-agent-sdk with ANTHROPIC_API_KEY.
-  //     Streaming + Nova tools + abort signal — full feature set.
-  //   - "cli" : spawn `claude -p ... --output-format stream-json` as a
-  //     subprocess. Uses the user's existing Claude Code CLI auth (OAuth
-  //     Pro/Max session) so no API key is needed. Multi-turn via
-  //     --resume <session_id>. Nova tools come from the CLI's own MCP
-  //     bridge, not the SDK in-process tools.
-  const chatMode = apiKey ? "sdk" : "cli";
+  // Auth mode — see the header comment. Both run the Agent SDK in
+  // streaming input mode; they differ in credentials, toolset and settings.
+  const chatMode = apiKey ? "sdk" : "oauth";
   if (chatMode === "sdk") {
     process.env.ANTHROPIC_API_KEY = apiKey;
-    log("info", "chat: using SDK mode (API key resolved)");
+    log("info", "chat: SDK mode (API key resolved) — Nova tools only, billed to the key");
   } else {
-    log("info", "chat: no API key — falling back to CLI subprocess mode (uses Claude Code session auth)");
+    log("info", "chat: OAuth mode (no API key) — driving the user's claude binary with their Claude Code login");
   }
+
+  // Permission mode for the spawned Claude Code (setting
+  // claudecode.chat.cliPermissionMode, kept under its historical key).
+  // `default` now means "ask in the chat" thanks to canUseTool below —
+  // it used to mean read-only because -p mode had nobody to ask.
+  const PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"];
+  const permissionMode = PERMISSION_MODES.includes(cliPermissionMode) ? cliPermissionMode : "acceptEdits";
+  log("info", `chat: permission mode ${permissionMode}`);
 
   // Model list that feeds the chat UI's picker. SDK mode asks the API so
   // the picker auto-discovers new models; CLI/OAuth mode has no key and
@@ -137,6 +153,8 @@ export async function init(opts) {
   // pushed to every client in its `config` message.
   const availableModels =
     (chatMode === "sdk" ? await fetchModels(apiKey, log) : null) || FALLBACK_MODELS;
+  // Note: in OAuth mode the picker is the curated fallback list; the SDK's
+  // supportedModels() could replace it later, once the session is live.
   log("info", `chat: ${availableModels.length} models offered to the picker (${chatMode === "sdk" && availableModels !== FALLBACK_MODELS ? "discovered" : "fallback"})`);
 
   const { server: novaServer, toolNames: allowedToolNames } = buildNovaToolsServer({ callNovaTool, log });
@@ -254,137 +272,246 @@ export async function init(opts) {
     return parts.join("\n\n");
   }
 
-  // CLI subprocess driver. Spawns `claude -p ... --output-format stream-json`
-  // and translates the CLI's event stream into the same wire format that
-  // the SDK path emits (assistant_text / session_started / result), so the
-  // frontend doesn't care which backend is active.
-  function runClaudeCLI({ prompt, sessionId, send, log, abortController }) {
-    return new Promise((resolve, reject) => {
-      const claudeBin = claudePath || "claude";
-      const args = [
-        "-p", prompt,
-        "--output-format", "stream-json",
-        "--include-partial-messages",
-        "--verbose", // required for stream-json to emit deltas
-        "--model", model,
-      ];
-      // In non-interactive `-p` mode the default permission mode is read-only:
-      // file-edit prompts can't be answered, so Write/Edit are silently denied
-      // and the chat can read but never modify files. Pass the configured mode
-      // (default acceptEdits) so file modifications actually land. `default`
-      // preserves the old read-only behaviour for users who want it.
-      if (cliPermissionMode && cliPermissionMode !== "default") {
-        args.push("--permission-mode", cliPermissionMode);
+  // ── Claude Code process ────────────────────────────────────────
+  // Resolve the `claude` binary the SDK should drive. We prefer the user's
+  // own install (their OAuth login, skills, plugins and hooks live there)
+  // over the copy bundled inside the SDK; fall back to the bundle when the
+  // user's binary can't be found.
+  function resolveClaudeExecutable() {
+    const bin = claudePath || "claude";
+    try {
+      if (bin.startsWith("/")) return existsSync(bin) ? realpathSync(bin) : null;
+      const home = process.env.HOME || "";
+      const dirs = [`${home}/.local/bin`, "/usr/local/bin", "/opt/homebrew/bin", ...(process.env.PATH || "").split(":")];
+      for (const d of dirs) {
+        if (!d) continue;
+        const candidate = join(d, bin);
+        if (existsSync(candidate)) return realpathSync(candidate);
       }
-      if (sessionId) args.push("--resume", sessionId);
+    } catch (_) {}
+    return null;
+  }
+  const claudeExe = resolveClaudeExecutable();
+  log("info", claudeExe
+    ? `chat: Claude Code executable ${claudeExe}`
+    : `chat: "${claudePath || "claude"}" not found on PATH — using the SDK's bundled Claude Code`);
 
-      // Inherit env; Nova passes a limited PATH so we extend it with the
-      // usual install locations for the `claude` CLI when claudeBin is not
-      // an absolute path.
-      const env = { ...process.env };
-      if (!claudeBin.startsWith("/")) {
-        const home = process.env.HOME || "";
-        const extra = [`${home}/.local/bin`, "/usr/local/bin", "/opt/homebrew/bin"];
-        const cur = (env.PATH || "").split(":");
-        env.PATH = [...new Set([...extra, ...cur])].filter(Boolean).join(":");
-      }
-      // Point the subprocess at our own MCP bridge — the same two variables
-      // the "Launch Claude Code" command sets in an external terminal. Without
-      // them the -p process never discovers Nova and has no editor tools.
-      const bridge = getBridgeInfo ? getBridgeInfo() : null;
-      if (bridge && bridge.port) {
-        env.CLAUDE_CODE_SSE_PORT = String(bridge.port);
-        env.ENABLE_IDE_INTEGRATION = "true";
-      }
+  // Environment for the spawned process: inherit ours, but never let it
+  // believe it is nested inside another Claude Code session (Nova may have
+  // been launched from one), and never hand an API key to OAuth mode.
+  function claudeEnv() {
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+    if (chatMode === "oauth") delete env.ANTHROPIC_API_KEY;
+    return env;
+  }
 
-      let child;
+  // Extend PATH the way Nova's stripped subprocess PATH needs when spawning
+  // the CLI by bare name (used by `claude agents --json` below).
+  function spawnEnvForClaude() {
+    const env = claudeEnv();
+    const home = process.env.HOME || "";
+    const extra = [`${home}/.local/bin`, "/usr/local/bin", "/opt/homebrew/bin"];
+    env.PATH = [...new Set([...extra, ...(env.PATH || "").split(":")])].filter(Boolean).join(":");
+    return env;
+  }
+
+  function describeResultError(ev) {
+    if (Array.isArray(ev.errors) && ev.errors.length) return ev.errors.join("\n");
+    if (typeof ev.error === "string" && ev.error) return ev.error;
+    return ev.subtype || "query failed";
+  }
+
+  // One persistent Claude Code process per chat session.
+  //
+  // `push()` appends a user message to the async-generator prompt; the
+  // process picks it up as its next turn. `interrupt()` stops the current
+  // turn only. `close()` ends the process. Permission prompts arrive via
+  // canUseTool → forwarded to the chat as `permission_request`, answered
+  // with `permission_response` (allow / allow_always / deny).
+  function startSession({ resume, send, getModel, onSessionId, onClosed }) {
+    const queue = [];
+    let waiter = null;
+    let closed = false;
+    let sessionId = resume || null;
+    let turnsInFlight = 0;
+    let interrupted = false;
+    let textStreamed = false;   // deltas seen for the assistant message being built
+    const pending = new Map();  // permission id → { resolve, toolInput, suggestions }
+
+    async function* input() {
+      while (!closed) {
+        if (queue.length) yield queue.shift();
+        else await new Promise((resolve) => { waiter = resolve; });
+      }
+    }
+    function wake() { if (waiter) { const w = waiter; waiter = null; w(); } }
+
+    const abort = new AbortController();
+    const options = {
+      model: getModel(),
+      cwd: process.env.CC_WORKSPACE || process.cwd(),
+      includePartialMessages: true,
+      env: claudeEnv(),
+      ...(claudeExe ? { pathToClaudeCodeExecutable: claudeExe } : {}),
+      // OAuth mode = the user's terminal experience (all tools, their
+      // settings). SDK mode = cost-tuned: no built-in tools, no settings.
+      settingSources: chatMode === "oauth" ? ["user", "project"] : [],
+      ...(chatMode === "oauth" ? {} : { tools: [] }),
+      mcpServers: { nova: novaServer },
+      allowedTools: allowedToolNames,
+      permissionMode,
+      ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
+      canUseTool: (toolName, toolInput, ctx) => new Promise((resolve) => {
+        const id = `perm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const suggestions = Array.isArray(ctx?.suggestions) ? ctx.suggestions : [];
+        pending.set(id, { resolve, toolInput, suggestions });
+        send({ type: "permission_request", id, toolName, input: toolInput, canAlwaysAllow: suggestions.length > 0 });
+        log("info", `chat: permission requested for ${toolName} (${id})`);
+        if (ctx?.signal) {
+          ctx.signal.addEventListener("abort", () => {
+            if (pending.delete(id)) {
+              resolve({ behavior: "deny", message: "Cancelled" });
+              send({ type: "permission_resolved", id, behavior: "cancelled" });
+            }
+          }, { once: true });
+        }
+      }),
+      abortController: abort,
+      stderr: (data) => {
+        const line = String(data).trim();
+        if (line) log("debug", `claude stderr: ${line.slice(0, 300)}`);
+      },
+      ...(resume ? { resume } : {}),
+    };
+
+    const q = query({ prompt: input(), options });
+
+    (async () => {
       try {
-        child = spawn(claudeBin, args, {
-          env,
-          stdio: ["ignore", "pipe", "pipe"],
-          signal: abortController?.signal,
-        });
-      } catch (err) {
-        reject(err);
-        return;
-      }
-
-      let stdoutBuf = "";
-      let stderrBuf = "";
-      let capturedSessionId = null;
-      let lastCost = null;
-      let lastUsage = null;
-
-      child.stdout.on("data", (chunk) => {
-        stdoutBuf += chunk.toString("utf8");
-        let nl;
-        while ((nl = stdoutBuf.indexOf("\n")) !== -1) {
-          const line = stdoutBuf.slice(0, nl).trim();
-          stdoutBuf = stdoutBuf.slice(nl + 1);
-          if (!line) continue;
-          let evt;
-          try { evt = JSON.parse(line); }
-          catch (err) { log("warn", `chat cli: bad json line: ${line.slice(0, 120)}`); continue; }
-
-          // Map CLI events → frontend wire format.
-          if (evt.type === "system" && evt.subtype === "init") {
-            capturedSessionId = evt.session_id;
-            send({ type: "session_started", sessionId: evt.session_id, model: evt.model ?? model, mode: "cli" });
-          } else if (evt.type === "stream_event" && evt.event?.type === "content_block_delta") {
-            const delta = evt.event.delta;
-            if (delta?.type === "text_delta" && typeof delta.text === "string") {
-              send({ type: "assistant_text", chunk: delta.text });
-            } else if (delta?.type === "thinking_delta" && typeof delta.thinking === "string") {
-              send({ type: "assistant_thinking", chunk: delta.thinking });
-            }
-          } else if (evt.type === "assistant" && Array.isArray(evt.message?.content)) {
-            // Top-level assistant events carry committed message content,
-            // including tool_use blocks. The stream_event deltas don't
-            // include tool_use input directly, so we rely on this path
-            // for tool-card display.
-            for (const block of evt.message.content) {
-              if (block?.type === "tool_use") {
-                send({ type: "assistant_tool_use", name: block.name, input: block.input || {} });
+        for await (const ev of q) {
+          switch (ev.type) {
+            case "system":
+              if (ev.subtype === "init") {
+                sessionId = ev.session_id;
+                if (onSessionId) onSessionId(sessionId);
+                send({ type: "session_started", sessionId, model: ev.model ?? getModel(), mode: chatMode });
               }
-            }
-          } else if (evt.type === "user" && Array.isArray(evt.message?.content)) {
-            for (const block of evt.message.content) {
-              if (block?.type === "tool_result") {
-                const text = Array.isArray(block.content)
-                  ? block.content.map((c) => c.text ?? "").join("")
-                  : (block.content ?? "");
-                send({ type: "tool_result", name: block.name ?? "unknown", text, isError: !!block.is_error });
+              break;
+
+            case "stream_event": {
+              const e = ev.event;
+              if (e?.type === "content_block_delta") {
+                const d = e.delta;
+                if (d?.type === "text_delta" && typeof d.text === "string") {
+                  textStreamed = true;
+                  send({ type: "assistant_text", chunk: d.text });
+                } else if (d?.type === "thinking_delta" && typeof d.thinking === "string") {
+                  send({ type: "assistant_thinking", chunk: d.thinking });
+                }
               }
+              break;
             }
-          } else if (evt.type === "result") {
-            lastCost = evt.total_cost_usd ?? null;
-            lastUsage = evt.usage ?? null;
+
+            case "assistant": {
+              // Committed blocks. Text already streamed as deltas is skipped;
+              // tool_use only appears here (deltas don't carry tool input).
+              for (const block of ev.message?.content ?? []) {
+                if (block.type === "tool_use") {
+                  send({ type: "assistant_tool_use", name: block.name, input: block.input || {} });
+                } else if (block.type === "text" && block.text) {
+                  if (textStreamed) textStreamed = false;
+                  else send({ type: "assistant_text", chunk: block.text });
+                }
+              }
+              break;
+            }
+
+            case "user": {
+              for (const block of ev.message?.content ?? []) {
+                if (block.type === "tool_result") {
+                  const text = Array.isArray(block.content)
+                    ? block.content.map((c) => c.text ?? "").join("")
+                    : (block.content ?? "");
+                  send({ type: "tool_result", name: block.name ?? "unknown", text, isError: !!block.is_error });
+                }
+              }
+              break;
+            }
+
+            case "result": {
+              turnsInFlight = Math.max(0, turnsInFlight - 1);
+              textStreamed = false;
+              const ok = ev.subtype === "success";
+              send({
+                type: "result",
+                success: ok,
+                cost: ev.total_cost_usd ?? null,
+                tokens: ev.usage ? { input: ev.usage.input_tokens, output: ev.usage.output_tokens } : null,
+                ...(ok ? {} : { error: interrupted ? "Interrupted" : describeResultError(ev) }),
+              });
+              interrupted = false;
+              break;
+            }
           }
         }
-      });
-
-      child.stderr.on("data", (chunk) => { stderrBuf += chunk.toString("utf8"); });
-
-      child.on("error", (err) => reject(err));
-      child.on("close", (code) => {
-        if (code === 0) {
-          send({
-            type: "result",
-            success: true,
-            cost: lastCost,
-            tokens: lastUsage ? { input: lastUsage.input_tokens, output: lastUsage.output_tokens } : null,
-          });
-          resolve({ sessionId: capturedSessionId });
-        } else {
-          send({
-            type: "result",
-            success: false,
-            error: stderrBuf.trim().split("\n").slice(-3).join("\n") || `claude CLI exited with code ${code}`,
-          });
-          resolve({ sessionId: capturedSessionId }); // resolve, not reject — error already surfaced to client
+      } catch (err) {
+        if (!closed) {
+          log("error", `chat session error: ${err.message}`);
+          send({ type: "error", message: err.name === "AbortError" ? "session aborted" : (err.message || String(err)) });
         }
-      });
-    });
+      } finally {
+        closed = true;
+        wake();
+        for (const [id, p] of pending) {
+          p.resolve({ behavior: "deny", message: "Session closed" });
+          send({ type: "permission_resolved", id, behavior: "cancelled" });
+        }
+        pending.clear();
+        if (onClosed) onClosed();
+      }
+    })();
+
+    return {
+      get sessionId() { return sessionId; },
+      get busy() { return turnsInFlight > 0; },
+      push(userMessage) {
+        queue.push(userMessage);
+        turnsInFlight++;
+        wake();
+      },
+      answerPermission(id, behavior, message) {
+        const p = pending.get(id);
+        if (!p) return false;
+        pending.delete(id);
+        if (behavior === "allow") {
+          p.resolve({ behavior: "allow", updatedInput: p.toolInput });
+        } else if (behavior === "allow_always") {
+          p.resolve({ behavior: "allow", updatedInput: p.toolInput, updatedPermissions: p.suggestions });
+        } else {
+          p.resolve({ behavior: "deny", message: message || "Denied by the user in the Nova chat" });
+        }
+        log("info", `chat: permission ${id} → ${behavior}`);
+        return true;
+      },
+      async interrupt() {
+        if (!turnsInFlight) return;
+        interrupted = true;
+        try { await q.interrupt(); }
+        catch (err) { log("warn", `chat: interrupt failed: ${err.message}`); }
+      },
+      async setModel(m) {
+        try { await q.setModel(m); }
+        catch (err) { log("warn", `chat: setModel failed: ${err.message}`); }
+      },
+      close() {
+        if (closed) return;
+        closed = true;
+        wake();
+        try { abort.abort(); } catch (_) {}
+      },
+    };
   }
 
   // ── HTTP server (static files) ─────────────────────────────────
@@ -456,8 +583,8 @@ export async function init(opts) {
     log("info", `chat: ws client connected from ${req.socket.remoteAddress}`);
     chatClients.add(socket);
 
-    let currentAbortController = null;
-    let currentSessionId = null;
+    let session = null;           // live streaming-input session (started lazily)
+    let currentSessionId = null;  // Claude session to resume when (re)starting
 
     const send = (msg) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
@@ -471,6 +598,7 @@ export async function init(opts) {
       defaultModel: model,
       models: availableModels,
       mode: chatMode,
+      permissionMode,
       theme: process.env.CC_CHAT_THEME || "auto",
     });
 
@@ -487,16 +615,31 @@ export async function init(opts) {
       pendingResumeForNextClient = null;
     }
 
+    function ensureSession() {
+      if (session) return session;
+      const s = startSession({
+        resume: currentSessionId,
+        send,
+        getModel: () => model,
+        onSessionId: (id) => { currentSessionId = id; },
+        onClosed: () => { if (session === s) session = null; },
+      });
+      session = s;
+      return s;
+    }
+
+    function dropSession() {
+      if (session) { session.close(); session = null; }
+    }
+
     socket.on("message", async (raw) => {
       let msg;
       try { msg = JSON.parse(raw.toString("utf8")); }
       catch { send({ type: "error", message: "invalid JSON" }); return; }
 
       if (msg.type === "abort") {
-        if (currentAbortController) {
-          currentAbortController.abort();
-          log("info", "chat: query aborted");
-        }
+        // Stop the current turn; the process and its context survive.
+        if (session) { session.interrupt(); log("info", "chat: turn interrupted"); }
         return;
       }
 
@@ -504,26 +647,32 @@ export async function init(opts) {
         if (msg.model !== model) {
           log("info", `chat: switching model ${model} → ${msg.model}`);
           model = msg.model;
+          if (session) session.setModel(model);
+        }
+        return;
+      }
+
+      if (msg.type === "permission_response" && typeof msg.id === "string") {
+        const behavior = ["allow", "allow_always", "deny"].includes(msg.behavior) ? msg.behavior : "deny";
+        if (!session || !session.answerPermission(msg.id, behavior, msg.message)) {
+          log("warn", `chat: permission_response for unknown request ${msg.id}`);
         }
         return;
       }
 
       if (msg.type === "reset_session") {
-        // /clear from the frontend — drop our memory of the active
-        // session so the next user_message starts fresh (no --resume).
-        if (currentSessionId) {
-          log("info", `chat: clearing session ${currentSessionId}`);
-        }
+        // /clear from the frontend — end the process so the next
+        // user_message starts a brand-new conversation.
+        if (currentSessionId) log("info", `chat: clearing session ${currentSessionId}`);
+        dropSession();
         currentSessionId = null;
         send({ type: "session_cleared" });
         return;
       }
 
       if (msg.type === "list_sessions") {
-        // Reply with sessions from ~/.claude/projects/<cwd>/. Only
-        // makes practical sense in CLI mode (the SDK uses its own
-        // session store), but returning the list anyway lets the
-        // user see what's available either way.
+        // Reply with sessions from ~/.claude/projects/<cwd>/ — the same
+        // store both modes write to now that the SDK drives the CLI.
         try {
           const cwd = process.env.CC_WORKSPACE || process.cwd();
           const sessions = await listSessions(cwd, { limit: 30 });
@@ -537,17 +686,9 @@ export async function init(opts) {
 
       if (msg.type === "list_live_sessions") {
         // Enumerate live claude sessions running on THIS machine via
-        // `claude agents --json` (pid / cwd / status / sessionId). Lets
-        // the user jump into another running session from the CLI panel.
+        // `claude agents --json` (pid / cwd / status / sessionId).
         try {
-          const bin = claudePath || "claude";
-          const env = { ...process.env };
-          if (!bin.startsWith("/")) {
-            const home = process.env.HOME || "";
-            const extra = [`${home}/.local/bin`, "/usr/local/bin", "/opt/homebrew/bin"];
-            env.PATH = [...new Set([...extra, ...(env.PATH || "").split(":")])].filter(Boolean).join(":");
-          }
-          const child = spawn(bin, ["agents", "--json"], { env });
+          const child = spawn(claudeExe || claudePath || "claude", ["agents", "--json"], { env: spawnEnvForClaude() });
           let out = "";
           child.stdout.on("data", (c) => { out += c.toString("utf8"); });
           child.on("close", () => {
@@ -567,19 +708,13 @@ export async function init(opts) {
       }
 
       if (msg.type === "resume_session" && typeof msg.sessionId === "string") {
-        // Mark this session as the one to attach to on the next
-        // user_message. The CLI driver passes --resume <id>; the SDK
-        // path's `resume:` option uses the same variable. Note that
-        // SDK and CLI session stores are NOT interchangeable — the
-        // user is responsible for picking a session that matches the
-        // currently active chatMode.
+        // Attach to a past session: end the current process (if any) and
+        // start the next one with `resume`. Replay the transcript first so
+        // the user has visual continuity before their next prompt.
+        dropSession();
         currentSessionId = msg.sessionId;
         log("info", `chat: resuming session ${msg.sessionId}`);
 
-        // Replay the user/assistant turns of the chosen session so
-        // the user has visual continuity before sending the next
-        // prompt. Tool calls are skipped for now (they'd add a lot of
-        // noise on replay; can be surfaced later behind a toggle).
         send({ type: "history_begin", sessionId: msg.sessionId });
         try {
           const cwd = process.env.CC_WORKSPACE || process.cwd();
@@ -605,13 +740,6 @@ export async function init(opts) {
         return;
       }
 
-      if (currentAbortController) {
-        send({ type: "error", message: "previous query still running" });
-        return;
-      }
-
-      currentAbortController = new AbortController();
-
       // Slash command + workspace context injection. Both optional — the
       // client decides per-message whether to use them.
       const prompt = await buildPrompt({
@@ -620,129 +748,35 @@ export async function init(opts) {
         injectContext: msg.injectContext === true,
       });
 
-      // Multimodal — image attachments. SDK mode only; CLI rejects them
-      // because `claude -p` doesn't take inline image content.
+      // Multimodal — image attachments become `image` content blocks.
+      // Streaming input mode accepts them in both auth modes.
       const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
-      if (attachments.length > 0 && chatMode === "cli") {
-        send({ type: "error", message: "Image attachments require SDK mode (configure an Anthropic API key). The Claude Code CLI does not accept inline images." });
-        currentAbortController = null;
-        return;
-      }
+      const content = attachments.length > 0
+        ? [
+            ...attachments.map((a) => ({
+              type: "image",
+              source: { type: "base64", media_type: a.mediaType || "image/png", data: a.data },
+            })),
+            { type: "text", text: prompt },
+          ]
+        : prompt;
 
-      // CLI mode: spawn `claude -p ...`, parse stream-json, map events.
-      // Reuses the user's OAuth Pro/Max session, no API key needed.
-      if (chatMode === "cli") {
-        try {
-          const { sessionId } = await runClaudeCLI({
-            prompt,
-            sessionId: currentSessionId,
-            send,
-            log,
-            abortController: currentAbortController,
-          });
-          if (sessionId && !currentSessionId) currentSessionId = sessionId;
-        } catch (err) {
-          if (err.name === "AbortError") {
-            send({ type: "error", message: "query aborted" });
-          } else {
-            log("error", `chat CLI error: ${err.message}`);
-            send({ type: "error", message: err.message || String(err) });
-          }
-        } finally {
-          currentAbortController = null;
-        }
-        return;
-      }
-
-      // Build the SDK prompt. Plain string when there are no attachments;
-      // otherwise an async iterable of user messages with image + text
-      // content blocks (claude-agent-sdk accepts either form).
-      let sdkPrompt;
-      if (attachments.length > 0) {
-        sdkPrompt = (async function*() {
-          yield {
-            role: "user",
-            content: [
-              ...attachments.map((a) => ({
-                type: "image",
-                source: { type: "base64", media_type: a.mediaType || "image/png", data: a.data },
-              })),
-              { type: "text", text: prompt },
-            ],
-          };
-        })();
-      } else {
-        sdkPrompt = prompt;
-      }
-
+      // Queue the turn. If a turn is still running, the SDK processes this
+      // one right after it — no "previous query still running" rejection.
       try {
-        const q = query({
-          prompt: sdkPrompt,
-          options: {
-            model,
-            tools: [],
-            settingSources: [],
-            mcpServers: { nova: novaServer },
-            allowedTools: allowedToolNames,
-            abortController: currentAbortController,
-            ...(currentSessionId ? { resume: currentSessionId } : {}),
-          },
+        ensureSession().push({
+          type: "user",
+          message: { role: "user", content },
+          parent_tool_use_id: null,
         });
-
-        for await (const event of q) {
-          switch (event.type) {
-            case "system":
-              if (event.subtype === "init") {
-                if (!currentSessionId) currentSessionId = event.session_id;
-                send({ type: "session_started", sessionId: event.session_id, model: event.model ?? model, mode: "sdk" });
-              }
-              break;
-            case "assistant": {
-              const content = event.message?.content ?? [];
-              for (const block of content) {
-                if (block.type === "text") send({ type: "assistant_text", chunk: block.text });
-                else if (block.type === "thinking" && typeof block.thinking === "string") send({ type: "assistant_thinking", chunk: block.thinking });
-                else if (block.type === "tool_use") send({ type: "assistant_tool_use", name: block.name, input: block.input });
-              }
-              break;
-            }
-            case "user": {
-              const content = event.message?.content ?? [];
-              for (const block of content) {
-                if (block.type === "tool_result") {
-                  const text = Array.isArray(block.content)
-                    ? block.content.map((c) => c.text ?? "").join("")
-                    : (block.content ?? "");
-                  send({ type: "tool_result", name: block.name ?? "unknown", text, isError: !!block.is_error });
-                }
-              }
-              break;
-            }
-            case "result":
-              send({
-                type: "result",
-                success: event.subtype === "success",
-                cost: event.total_cost_usd ?? null,
-                tokens: event.usage ? { input: event.usage.input_tokens, output: event.usage.output_tokens } : null,
-                ...(event.subtype !== "success" ? { error: event.error ?? String(event) } : {}),
-              });
-              break;
-          }
-        }
       } catch (err) {
-        if (err.name === "AbortError") {
-          send({ type: "error", message: "query aborted" });
-        } else {
-          log("error", `chat query error: ${err.message}`);
-          send({ type: "error", message: err.message || String(err) });
-        }
-      } finally {
-        currentAbortController = null;
+        log("error", `chat: failed to start session: ${err.message}`);
+        send({ type: "error", message: err.message || String(err) });
       }
     });
 
     socket.on("close", () => {
-      if (currentAbortController) currentAbortController.abort();
+      dropSession();
       chatClients.delete(socket);
       log("info", "chat: ws client disconnected");
     });

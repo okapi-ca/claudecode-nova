@@ -392,6 +392,84 @@ body {
 .tool.error .tool__icon { background: var(--error); }
 .tool.error .tool__name { color: var(--error); }
 
+/* ── permission prompt cards ─────────────────────────────────────── */
+
+.perm {
+  background: var(--tool-bg);
+  border: 1px solid var(--accent-warm);
+  border-radius: var(--radius);
+  max-width: 880px;
+  min-width: 0;
+  align-self: flex-start;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.perm__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.perm__icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-warm);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 0 var(--accent-warm);
+  animation: perm-pulse 1.6s ease-out infinite;
+}
+
+@keyframes perm-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 180, 84, 0.55); }
+  100% { box-shadow: 0 0 0 9px rgba(255, 180, 84, 0); }
+}
+
+.perm__title { font-weight: 600; white-space: nowrap; }
+.perm__tool  { font-family: var(--font-mono); color: var(--accent-warm); }
+
+.perm__summary {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.perm__pre {
+  background: var(--code-bg);
+  padding: 8px 10px;
+  border-radius: 4px;
+  overflow: auto;
+  max-height: 220px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.perm__actions { display: flex; gap: 8px; }
+
+.perm__outcome {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.perm--resolved { border-color: var(--tool-border); }
+.perm--resolved .perm__icon { animation: none; box-shadow: none; }
+.perm--allow .perm__icon, .perm--allow_always .perm__icon { background: var(--success); }
+.perm--deny .perm__icon, .perm--cancelled .perm__icon { background: var(--error); }
+.perm--allow .perm__outcome, .perm--allow_always .perm__outcome { color: var(--success); }
+.perm--deny .perm__outcome { color: var(--error); }
+
 /* ── composer ───────────────────────────────────────────────────── */
 
 .composer {

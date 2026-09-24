@@ -66,11 +66,11 @@ function formatDescriptive(s) {
   return "";
 }
 
-// Short label for the auth/runtime mode. The chat backend picks between
-// the Anthropic SDK (with an API key) and a `claude` CLI subprocess
-// fallback (OAuth Pro/Max session, no key needed).
+// Short label for the auth mode. Both modes run the Claude Agent SDK over
+// a persistent Claude Code process; they differ in credentials — an
+// Anthropic API key, or the user's Claude Code login (OAuth, no key).
 function modeLabel(apiKeySource) {
-  if (apiKeySource === "claude-cli") return "CLI";
+  if (apiKeySource === "oauth" || apiKeySource === "claude-cli") return "OAuth";
   if (apiKeySource) return "SDK";
   return "";
 }
@@ -82,8 +82,8 @@ function formatTooltip(s) {
       lines.push("Status: running");
       if (s.url) lines.push("URL: " + s.url);
       if (s.model) lines.push("Model: " + s.model);
-      if (s.apiKeySource === "claude-cli") {
-        lines.push("Auth: Claude Code CLI session (OAuth Pro/Max — no API key)");
+      if (s.apiKeySource === "oauth" || s.apiKeySource === "claude-cli") {
+        lines.push("Auth: your Claude Code login (OAuth Pro/Max/Enterprise — no API key)");
       } else if (s.apiKeySource) {
         lines.push("Auth: Anthropic SDK — key from " + s.apiKeySource);
       }

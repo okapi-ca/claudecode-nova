@@ -27,7 +27,7 @@ The Nova extension (`main.js`) spawns a Node.js subprocess (`ws-server.js`) that
 - **File operations** — Claude can open files, save documents, and check for unsaved changes
 - **Six live sidebar sections** — Connection status · pending-diffs queue with per-item Accept/Reject · activity log of file ops + diff outcomes · recent sessions for the workspace · Claude Code CLI version · Chat UI status (auto-refreshes every 30 s)
 - **One-click launch** — Open Claude Code in iTerm or Terminal.app with the IDE-bridge env vars pre-set; the bridge connects automatically
-- **Opt-in embedded chat + terminal** — In-window chat (Anthropic SDK or `claude` CLI subprocess backend) and a real PTY-backed terminal panel, both running on a single localhost HTTP server
+- **Opt-in embedded chat + terminal** — In-window chat on a persistent Claude Code session (Anthropic API key, or your Claude Code login) with permission prompts, interrupt and image attachments, plus a real PTY-backed terminal panel, both on a single localhost HTTP server
 - **24 slash commands** — Code-on-selection (`/explain`, `/refactor`, `/test`, `/doc`, `/fix`, `/review`, `/optimize`, `/simplify`, `/types`, `/security`, `/rename`), git-driven (`/commit`, `/changelog`, `/pr`), workspace (`/explain-error`, `/why`, `/search`, `/find`), conversation (`/plan`, `/recap`, `/clear`), documentation (`/spec`, `/readme`, `/api-doc`)
 - **Resume any session** — Click an entry in the Recent Sessions sidebar (or the chat's "Resume…" menu) to replay + continue any prior conversation from `~/.claude/projects/<workspace>/*.jsonl`
 - **Secure by default** — Localhost-only servers; the MCP bridge, the chat and the embedded terminal each require a secret token, and the chat/terminal WebSockets also refuse foreign `Origin`/`Host` headers. No data leaves the machine
@@ -38,10 +38,12 @@ In addition to the traditional Mode A (Claude Code CLI in an external terminal t
 
 ### Chat (web)
 
-A pure HTML/CSS/JS chat UI served by the bundled `chat-session.mjs`. Two backends are auto-selected:
+A pure HTML/CSS/JS chat UI served by the bundled `chat-session.mjs`. The backend is the Claude Agent SDK in *streaming input* mode — one persistent Claude Code process per chat session, so follow-ups don't pay a cold start, Stop interrupts the current turn without losing the conversation, images attach in every mode, and permission prompts show up in the chat. Two auth modes are auto-selected:
 
-- **SDK mode** — when an Anthropic API key is resolved (Keychain → 1Password → direct config in that order), the chat drives Claude via `@anthropic-ai/claude-agent-sdk` in-process. You get streaming text, custom tool calls (24 Nova editor + workspace operations exposed as MCP tools), and the SDK's full event stream (`thinking_delta`, `tool_use`, `tool_result`, cost / usage). Billed against the API key.
-- **CLI fallback** — when no API key is configured, the chat spawns `claude -p ... --output-format stream-json --include-partial-messages` as a subprocess. Uses the user's existing Claude Code OAuth session (Pro / Max / Enterprise), so usage is covered by the subscription. Multi-turn via `--resume <session_id>`. The chat UI label badge says `CLI` instead of `SDK` so you know which one is active.
+- **SDK mode** — when an Anthropic API key is resolved (Keychain → 1Password → direct config in that order). Cost-tuned: Claude Code's built-in tools are off and the 24 Nova editor + workspace tools are the only tools. Billed against the API key; badge `SDK`.
+- **OAuth mode** — when no API key is configured, the SDK launches *your* `claude` binary with your Claude Code login (Pro / Max / Enterprise), the full built-in toolset and your user + project settings (skills, plugins, hooks) — your terminal experience, in the chat. Usage is covered by the subscription; the cost shown is the API equivalent. Badge `OAuth`.
+
+**Permission prompts** — tools the permission mode (`claudecode.chat.cliPermissionMode`) doesn't pre-approve pause the turn and show a card with *Allow / Always allow / Deny*. Nova editor tools are always pre-approved.
 
 What both modes have in common:
 
@@ -264,7 +266,7 @@ claudecode-nova.novaextension/
 ├── Scripts/
 │   ├── main.js                 # Extension entry point — Nova APIs ↔ subprocesses
 │   ├── ws-server.js            # MCP bridge (WebSocket server, Node subprocess)
-│   ├── chat-session.mjs        # Chat backend (/ws) — SDK + CLI subprocess modes
+│   ├── chat-session.mjs        # Chat backend (/ws) — Agent SDK streaming-input session (API key or OAuth)
 │   ├── cli-session.mjs         # CLI panel backend (/cli) — node-pty PTY bridge
 │   ├── chat-tool-wrappers.mjs  # In-process MCP tools exposed to the chat SDK
 │   ├── list-sessions.mjs       # Parses ~/.claude/projects/<cwd>/*.jsonl
@@ -319,7 +321,6 @@ For the full version history, see [CHANGELOG.md](claudecode-nova.novaextension/C
 
 ## Future ideas
 
-- Multimodal: drag-drop images into the chat for vision-aware questions (SDK mode only)
 - Extended thinking mode toggle (`thinking.budget_tokens`)
 - Specialized sub-agents invocable from chat (reviewer, test-writer, security-checker)
 - Auto-purge of zombie chat server on the chat port at bridge startup
