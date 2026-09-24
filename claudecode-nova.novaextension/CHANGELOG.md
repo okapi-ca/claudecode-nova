@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.25.0 — 2026-09-24
+
+### Changed — the chat now runs on a persistent Claude Code session
+
+Both chat auth modes now drive the Claude Agent SDK in **streaming input
+mode**: one long-lived Claude Code process per chat session, fed message
+by message, instead of a fresh `claude -p … --resume` process per turn in
+the no-API-key case.
+
+- **No cold start between turns.** Follow-ups reuse the running process
+  and its context; the `--resume` round-trip per message is gone.
+- **Permission prompts in the chat.** When Claude wants to run a tool the
+  permission mode doesn't pre-approve, a card appears in the chat with
+  **Allow / Always allow / Deny**; the turn waits for your answer. *Always
+  allow* applies Claude Code's own suggestion (e.g. switch the session to
+  `acceptEdits`) so the same class of action stops asking. This makes the
+  `default` permission mode useful again — it used to mean "read-only"
+  because `-p` mode had nobody to ask.
+- **Stop interrupts the turn, not the session.** The Stop button now
+  sends an interrupt: the current turn ends with `Interrupted`, the
+  process and its context survive, and the next message continues.
+- **Images in both modes.** Drag-drop / paste attachments were SDK-only;
+  streaming input carries image blocks whichever way you authenticate.
+- **Queued messages.** Sending while a turn is running queues the message
+  for the next turn instead of being rejected.
+- **OAuth mode drives your own `claude`.** Without an API key the SDK now
+  launches the `claude` binary from your PATH (`claudecode.claudeCommand`)
+  with your Claude Code login, the full built-in toolset and your user +
+  project settings (skills, plugins, hooks) — the same experience as your
+  terminal, inside the chat. Nova editor tools stay available in-process
+  and pre-approved. The mode is reported as `oauth` (badge "OAuth"; the
+  sidebar says "OAuth" instead of "CLI").
+- SDK mode (API key) is unchanged in spirit — cost-tuned, Nova tools only —
+  but also gains prompts, interrupt and queuing.
+
+### Settings
+
+- `claudecode.chat.cliPermissionMode` keeps its key but is now simply the
+  **Chat permission mode**, applied to both auth modes:
+  `acceptEdits` (default — file edits don't ask, everything else does),
+  `default` (ask for every non-read-only tool), `bypassPermissions`
+  (never ask). The old "read-only" meaning of `default` is gone.
+
+### Fixed
+
+- The bridge subprocess crashed with an `EPIPE` stack trace when its
+  parent went away mid-write (e.g. Nova quitting first); it now treats a
+  dead parent as a shutdown signal and exits quietly after removing its
+  lock file.
+
+### Wire format (chat WebSocket)
+
+New server → client messages: `permission_request {id, toolName, input,
+canAlwaysAllow}`, `permission_resolved {id, behavior}`. New client →
+server message: `permission_response {id, behavior: allow |
+allow_always | deny}`. `config` now carries `permissionMode`; `mode` is
+`"sdk"` or `"oauth"` (was `"cli"`). `abort` now means "interrupt the
+turn". A `result` whose turn was interrupted has `error: "Interrupted"`.
+
+### Tests
+
+- New local-only `tests/chat-turn.test.js` drives the real chat server
+  through a first turn, a context-dependent follow-up on the same
+  session, a denied `Write` permission prompt (file must not appear),
+  an interrupted turn, and a post-interrupt turn.
+
 ## 0.24.0 — 2026-09-24
 
 ### Security
