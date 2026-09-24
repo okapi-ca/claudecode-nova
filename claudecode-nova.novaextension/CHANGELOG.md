@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.26.0 — 2026-09-24
+
+### Changed — bundle down from 250 MB to about 20 MB
+
+- **The vendored Claude Code binary is gone.** `@anthropic-ai/claude-agent-sdk`
+  ships a 214 MB copy of Claude Code per platform; the chat has driven the
+  user's own `claude` since v0.25.0 (`pathToClaudeCodeExecutable`), and the
+  SDK only reaches for the vendored copy when that option is missing. The
+  extension therefore no longer bundles it. If `claude` isn't on PATH (or
+  the *Claude CLI command* project setting points nowhere), the chat now
+  says so explicitly on the first message instead of silently falling
+  back — the bridge and the terminal panel already required the CLI.
+- **`node_modules` is pruned at install time** by the new
+  `Scripts/prune-deps.mjs` (npm `postinstall`, also `npm run prune`):
+  every platform's vendored binary, node-pty's C++/winpty build inputs and
+  non-Apple-Silicon prebuilds, `.bin` shims, TypeScript declarations,
+  source maps, package READMEs, `test`/`docs`/`examples` trees, and the
+  TypeScript sources zod and the Anthropic SDK ship next to their compiled
+  output. Licences stay.
+- `tests/validate-manifest.js` now refuses to pass when `Scripts/node_modules`
+  is present but unpruned (vendored binary, `.bin`, foreign prebuilds,
+  stray `.map` / `.d.ts`), and checks the runtime dependencies survived —
+  a pre-publish guard, since Nova packages the directory as-is.
+
+### Documentation
+
+- Installation from source now spells out the `npm install` step in
+  `Scripts/` (the repo doesn't track `node_modules`) and the Requirements
+  table says the Claude Code CLI is required by the chat as well.
+
 ## 0.25.0 — 2026-09-24
 
 ### Changed — the chat now runs on a persistent Claude Code session
