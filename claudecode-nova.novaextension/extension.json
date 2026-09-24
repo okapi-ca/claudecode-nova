@@ -70,6 +70,10 @@
         "command": "claudecode.clearChatApiKey"
       },
       {
+        "title": "Rotate Claude Chat Access Token",
+        "command": "claudecode.rotateChatToken"
+      },
+      {
         "title": "Check for Claude Code Updates",
         "command": "claudecode.checkForUpdates"
       }
@@ -252,7 +256,7 @@
       "title": "Enable Chat UI (Mode B — experimental)",
       "type": "boolean",
       "default": false,
-      "description": "Opt-in to the in-browser chat UI powered by the Claude Agent SDK. Requires an Anthropic API key. When enabled, a chat server starts on the configured port; open the URL in Safari/Firefox or in Nova's Preview tab. Independent from the existing CLI bridge mode."
+      "description": "Opt-in to the in-browser chat UI. With an Anthropic API key it runs on the Claude Agent SDK; without one it falls back to your Claude Code CLI login (Pro/Max/Enterprise). When enabled, a chat server starts on the configured port; use the \"Open Claude Chat in Browser\" command to open it (the URL carries a private access token). Independent from the existing CLI bridge mode."
     },
     {
       "key": "claudecode.chat.keychainService",
@@ -299,20 +303,23 @@
       "title": "Chat model",
       "type": "enum",
       "values": [
-        ["claude-sonnet-4-6", "Sonnet 4.6 (recommended — cheap, capable)"],
-        ["claude-haiku-4-5", "Haiku 4.5 (fastest, lowest cost)"],
-        ["claude-opus-4-7", "Opus 4.7 (capable, expensive)"],
-        ["claude-opus-4-8", "Opus 4.8 (latest, most capable — 1M context)"]
+        ["claude-sonnet-5", "Sonnet 5 (recommended — fast, capable)"],
+        ["claude-fable-5-1", "Fable 5.1 (most intelligent)"],
+        ["claude-opus-5-5", "Opus 5.5 (frontier, expensive)"],
+        ["claude-opus-4-8", "Opus 4.8 (1M context)"],
+        ["claude-opus-4-7", "Opus 4.7"],
+        ["claude-sonnet-4-6", "Sonnet 4.6"],
+        ["claude-haiku-4-5", "Haiku 4.5 (fastest, lowest cost)"]
       ],
-      "default": "claude-sonnet-4-6",
-      "description": "Model used by the chat UI. Sonnet 4.6 hits the sweet spot for cost/quality."
+      "default": "claude-sonnet-5",
+      "description": "Default model for the chat UI; switchable mid-conversation from the picker. In SDK mode the picker lists whatever your API key can reach; in CLI/OAuth mode it uses this curated list."
     },
     {
       "key": "claudecode.chat.port",
       "title": "Chat UI port",
       "type": "number",
       "default": 5180,
-      "description": "Fixed port for the chat HTTP server. Configure Nova's Project Settings → Preview URL to http://127.0.0.1:<port>/ to use the chat UI inside the Preview tab."
+      "description": "Fixed port for the chat HTTP server. Open the chat with the \"Open Claude Chat in Browser\" command: its Nova Preview / Browser / Copy URL actions include the private access token the chat and terminal WebSockets require (a bare http://127.0.0.1:<port>/ URL renders the page but cannot connect)."
     },
     {
       "key": "claudecode.chat.cliPermissionMode",

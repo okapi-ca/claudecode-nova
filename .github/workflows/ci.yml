@@ -8,7 +8,7 @@ on:
 
 jobs:
   validate:
-    name: Static checks + handshake regression test
+    name: Static checks + regression tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,14 +17,33 @@ jobs:
         with:
           node-version: "20"
 
+      # Every script Nova or the Node subprocess loads, CommonJS and ESM alike.
       - name: JavaScript syntax check
         run: |
-          node --check claudecode-nova.novaextension/main.js
-          node --check claudecode-nova.novaextension/Scripts/ws-server.js
-          node --check claudecode-nova.novaextension/Scripts/call-bridge.js
+          set -e
+          for f in claudecode-nova.novaextension/main.js \
+                   claudecode-nova.novaextension/Scripts/*.js \
+                   claudecode-nova.novaextension/Scripts/*.mjs \
+                   claudecode-nova.novaextension/Scripts/chat-ui/*.js \
+                   tests/*.js tests/*.mjs; do
+            echo "node --check $f"
+            node --check "$f"
+          done
+
+      # Nova loads Scripts/main.js but refuses to start without the root
+      # main.js named in extension.json, so the two are kept as a synced
+      # pair that differs only by require() prefix. Catch drift here.
+      - name: Root main.js mirrors Scripts/main.js
+        run: |
+          diff <(sed 's|require("\./Scripts/|require("./|g' claudecode-nova.novaextension/main.js) \
+               claudecode-nova.novaextension/Scripts/main.js \
+            && echo "main.js pair in sync"
 
       - name: Validate extension.json + version consistency
         run: node tests/validate-manifest.js
 
       - name: WebSocket handshake regression test
         run: node tests/handshake.test.js
+
+      - name: Chat/terminal WebSocket authorization (unit)
+        run: node tests/ws-auth.test.mjs

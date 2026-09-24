@@ -74,7 +74,8 @@ let chatState = {
   model: null,
   apiKeySource: null,        // "keychain" | "1password" | "config"
   lastError: null,
-  url: null,
+  url: null,               // full URL incl. ?token=… — what "Open"/"Copy URL" hand out
+  token: null,             // shared secret for /ws and /cli (see Scripts/ws-auth.mjs)
   lastUpdatedAt: null,
 };
 let chatStatusProvider = null;
@@ -94,6 +95,7 @@ exports.activate = function() {
       nova.commands.register("claudecode.restart", restartBridge),
       nova.commands.register("claudecode.sendSelection", sendSelectionToContext),
       nova.commands.register("claudecode.addFile", addCurrentFile),
+      nova.commands.register("claudecode.rotateChatToken", rotateChatTokenHandler),
       nova.commands.register("claudecode.status", showStatus),
       nova.commands.register("claudecode.launchClaude", launchClaude),
       nova.commands.register("claudecode.activityClick", activityClickHandler),
@@ -351,6 +353,93 @@ function runOpRead(ref) {
 // three opening modes: copy to clipboard, open in default browser, or
 // open inside Nova as a previewable HTML wrapper (which the user can
 // then split-right via Cmd+Shift+H or drag-to-side).
+// ---------------------------------------------------------------------------
+// Chat access token
+//
+// The chat (/ws) and terminal (/cli) WebSockets are loopback-only, but a
+// WebSocket opened from any web page is not subject to CORS — so without a
+// secret, any site loaded in a browser on this Mac could reach the PTY.
+// We mint one random token per install, persist it under the extension's
+// global storage (mode 0600 by default) so the chat URL stays stable
+// across bridge restarts, and pass it to ws-server.js as CC_CHAT_TOKEN.
+// The token rides in the chat URL as ?token=…; chat.js forwards it on
+// both WebSocket upgrades and ws-auth.mjs checks it in constant time.
+// ---------------------------------------------------------------------------
+function chatTokenPath() {
+  return nova.path.join(nova.extension.globalStoragePath, "chat-token");
+}
+
+function randomToken() {
+  try {
+    if (nova.crypto && typeof nova.crypto.randomUUID === "function") {
+      return nova.crypto.randomUUID();
+    }
+  } catch (_) {}
+  // Fallback: 128 bits from Math.random — weaker, but only reachable on a
+  // Nova build without nova.crypto, and still unguessable from a web page.
+  var hex = "";
+  for (var i = 0; i < 32; i++) hex += Math.floor(Math.random() * 16).toString(16);
+  return hex;
+}
+
+function getOrCreateChatToken() {
+  var tokenPath = chatTokenPath();
+  try {
+    var f = nova.fs.open(tokenPath, "r");
+    var existing = (f.read() || "").trim();
+    f.close();
+    if (/^[A-Za-z0-9-]{32,}$/.test(existing)) return existing;
+  } catch (_) { /* first run — fall through and create */ }
+
+  var token = randomToken();
+  try {
+    try { nova.fs.mkdir(nova.extension.globalStoragePath); } catch (_) {}
+    var out = nova.fs.open(tokenPath, "w");
+    out.write(token);
+    out.close();
+  } catch (err) {
+    // Not fatal: the token still protects this bridge run; it will just be
+    // re-minted next time (and the wrapper file regenerated to match).
+    console.warn("Claude Code Bridge: could not persist chat token: " + err.message);
+  }
+  return token;
+}
+
+// Regenerate the token (e.g. if the user suspects it leaked). Takes effect
+// on the next bridge restart; existing chat tabs must be reopened.
+function rotateChatToken() {
+  try { nova.fs.remove(chatTokenPath()); } catch (_) {}
+  chatState.token = getOrCreateChatToken();
+  return chatState.token;
+}
+
+// Base URL (no token) — safe to show in notifications and the sidebar.
+function chatBaseUrl(port) {
+  return "http://127.0.0.1:" + (port || nova.config.get("claudecode.chat.port") || 5180) + "/";
+}
+
+// Full URL with the token — what we hand to the browser / Preview / clipboard.
+function chatUrlWithToken(port) {
+  var token = chatState.token || getOrCreateChatToken();
+  return chatBaseUrl(port) + "?token=" + encodeURIComponent(token);
+}
+
+// Command: mint a new chat access token and restart the bridge so the
+// chat / terminal servers pick it up. Open chat tabs must be reopened via
+// "Open Claude Chat in Browser" (their URL carries the old token).
+function rotateChatTokenHandler() {
+  nova.workspace.showActionPanel(
+    "Rotate the chat access token?\n\nThe bridge restarts and every open chat / terminal tab must be reopened from the \"Open Claude Chat in Browser\" command.",
+    { buttons: ["Rotate and Restart", "Cancel"] },
+    function(idx) {
+      if (idx !== 0) return;
+      rotateChatToken();
+      showNotification("Chat token rotated", "Restarting the bridge with the new token…");
+      nova.commands.invoke("claudecode.restart");
+    },
+  );
+}
+
 function openChatHandler() {
   if (!nova.config.get("claudecode.chat.enabled")) {
     nova.workspace.showActionPanel(
@@ -364,10 +453,10 @@ function openChatHandler() {
   }
 
   const port = nova.config.get("claudecode.chat.port") || 5180;
-  const url  = "http://127.0.0.1:" + port + "/";
+  const url  = chatUrlWithToken(port);
 
   nova.workspace.showActionPanel(
-    "Claude Chat UI\n\n" + url + "\n\nOpen in Nova creates a previewable wrapper file you can split to the right; press Cmd+Shift+H to preview or right-click the tab → Split Right.",
+    "Claude Chat UI\n\n" + chatBaseUrl(port) + "\n\nThe copied / opened URL carries a private access token — don't paste it into shared places.\n\nOpen in Nova creates a previewable wrapper file you can split to the right; press Cmd+Shift+H to preview or right-click the tab → Split Right.",
     { buttons: ["Open in Nova Preview", "Open in Browser", "Copy URL", "Close"] },
     function(idx) {
       if (idx === 0) {
@@ -381,7 +470,7 @@ function openChatHandler() {
         }
       } else if (idx === 2) {
         nova.clipboard.writeText(url);
-        showNotification("Copied", url + " is in your clipboard.");
+        showNotification("Copied", chatBaseUrl(port) + " (with access token) is in your clipboard.");
       }
     },
   );
@@ -426,7 +515,7 @@ function openChatInNovaPreview(url) {
   nova.workspace.openFile(wrapperPath).then(function() {
     showNotification(
       "Chat wrapper opened",
-      "Press Cmd+Shift+H to show the Preview, then drag the Preview tab to the right to dock it. The chat is at " + url + "."
+      "Press Cmd+Shift+H to show the Preview, then drag the Preview tab to the right to dock it. The chat is at " + chatBaseUrl() + "."
     );
   }, function(err) {
     showNotification("Cannot open chat wrapper", err.message);
@@ -501,10 +590,16 @@ async function startBridge() {
   // Build env. If chat (Mode B) is opt-in, resolve the API key first
   // (1Password reference or direct config value) and add the CC_CHAT_* vars
   // so ws-server.js lazy-loads chat-session.mjs at startup.
+  // openDiff blocks until the user answers; tell ws-server how long main.js
+  // keeps a diff alive so its safety-net deadline sits just past ours
+  // (0 = diffs never expire → no deadline at all on the ws-server side).
+  var diffMinutes = nova.config.get("claudecode.diffTimeoutMinutes");
+  if (typeof diffMinutes !== "number" || !(diffMinutes >= 0)) diffMinutes = 30;
   const env = {
     CC_PORT_MIN: String(portMin),
     CC_PORT_MAX: String(portMax),
     CC_WORKSPACE: workspace,
+    CC_DIFF_TIMEOUT_MS: String(diffMinutes === 0 ? 0 : diffMinutes * 60000 + 60000),
   };
 
   if (nova.config.get("claudecode.chat.enabled")) {
@@ -512,7 +607,9 @@ async function startBridge() {
       const apiKey = await resolveChatApiKey();
       env.CC_CHAT_ENABLED = "1";
       env.CC_CHAT_PORT    = String(nova.config.get("claudecode.chat.port") || 5180);
-      env.CC_CHAT_MODEL   = nova.config.get("claudecode.chat.model") || "claude-sonnet-4-6";
+      env.CC_CHAT_MODEL   = nova.config.get("claudecode.chat.model") || "claude-sonnet-5";
+      chatState.token     = getOrCreateChatToken();
+      env.CC_CHAT_TOKEN   = chatState.token;
       // Pass the claude CLI path so chat-session.mjs can spawn it directly
       // when running in fallback "cli" mode (no API key resolved), and
       // so cli-session.mjs (embedded terminal panel) can launch the same
@@ -535,7 +632,7 @@ async function startBridge() {
       chatState.port = parseInt(env.CC_CHAT_PORT, 10) || 5180;
       chatState.model = env.CC_CHAT_MODEL;
       chatState.lastError = null;
-      chatState.url = "http://127.0.0.1:" + chatState.port + "/";
+      chatState.url = chatUrlWithToken(chatState.port);
       refreshChatStatusSidebar();
     } catch (err) {
       console.error("Claude Code Bridge: chat API key resolution failed:", err.message);
@@ -700,6 +797,11 @@ function handleServerMessage(msg) {
       updateSidebar();
       break;
 
+    case "client_identified":
+      // Claude Code sent its `ide_connected` notification with its pid.
+      console.log("Claude Code Bridge: connected claude process pid " + (msg.pid || "?"));
+      break;
+
     case "tool_call":
       handleToolCall(msg);
       break;
@@ -716,12 +818,13 @@ function handleServerMessage(msg) {
       console.log("Claude Code Bridge: chat server started on port " + msg.port);
       chatState.state = "running";
       chatState.port = msg.port || chatState.port;
-      chatState.url = "http://127.0.0.1:" + chatState.port + "/";
+      if (msg.token) chatState.token = msg.token;   // ws-server minted one if ours was missing
+      chatState.url = chatUrlWithToken(chatState.port);
       chatState.lastError = null;
       refreshChatStatusSidebar();
       showNotification(
         "Chat UI ready",
-        "Claude chat is live at " + chatState.url + "\nUse \"Open Claude Chat in Browser\" command to open it, or configure Nova Project Settings → Preview URL."
+        "Claude chat is live at " + chatBaseUrl(chatState.port) + "\nUse the \"Open Claude Chat in Browser\" command — it opens/copies the URL with the required access token."
       );
       break;
 

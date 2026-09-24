@@ -679,8 +679,23 @@ if (jumpLatestBtn) {
 
 // ── WebSocket ─────────────────────────────────────────────────────
 
+// Shared secret the server requires on /ws and /cli upgrades. It rides in
+// the page URL (?token=…), put there by the Nova extension when it builds
+// the chat URL. Pages opened without it still render, but can't connect —
+// the status bar says so instead of spinning forever.
+const AUTH_TOKEN = new URLSearchParams(location.search).get("token") || "";
+
+// Append the token to a WebSocket path that may already carry a query.
+function withToken(pathAndQuery) {
+  if (!AUTH_TOKEN) return pathAndQuery;
+  return pathAndQuery + (pathAndQuery.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(AUTH_TOKEN);
+}
+
 function connect() {
-  const wsUrl = `ws://${location.host}/ws`;
+  if (!AUTH_TOKEN) {
+    setStatus("error", "Missing access token — open the chat from Nova (Open Claude Chat command)");
+  }
+  const wsUrl = `ws://${location.host}${withToken("/ws")}`;
   ws = new WebSocket(wsUrl);
   setStatus("idle", "Connecting…");
 
@@ -1307,7 +1322,7 @@ function connectTerminalWs(sessionIdToResume) {
   // Reconnecting with ?session=<id> tells cli-session to spawn the
   // PTY with --resume <id>. Used by the resume flows.
   const qs = sessionIdToResume ? `?session=${encodeURIComponent(sessionIdToResume)}` : "";
-  const url = `ws://${location.host}/cli${qs}`;
+  const url = `ws://${location.host}${withToken("/cli" + qs)}`;
   termWs = new WebSocket(url);
   // Capture this socket so handlers can tell whether they belong to the
   // CURRENT connection. Without this, an old socket's late `close` event

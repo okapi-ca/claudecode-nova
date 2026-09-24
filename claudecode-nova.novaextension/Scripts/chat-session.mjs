@@ -23,6 +23,7 @@ import { fileURLToPath } from "url";
 import { WebSocketServer } from "ws";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { buildNovaToolsServer } from "./chat-tool-wrappers.mjs";
+import { authorizeRequest, rejectUpgrade } from "./ws-auth.mjs";
 import { listSessions, streamSessionTranscript } from "./list-sessions.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -34,9 +35,10 @@ const CHAT_UI_DIR = join(__dirname, "chat-ui");
 // Keep the newest / most capable first. When a new model ships, adding
 // it here is the one manual edit that keeps CLI-mode users current.
 const FALLBACK_MODELS = [
-  { id: "claude-opus-4-8",   label: "Opus 4.8 (1M)" },
+  { id: "claude-fable-5-1",  label: "Fable 5.1" },
+  { id: "claude-opus-5-5",   label: "Opus 5.5" },
   { id: "claude-sonnet-5",   label: "Sonnet 5" },
-  { id: "claude-fable-5",    label: "Fable 5" },
+  { id: "claude-opus-4-8",   label: "Opus 4.8 (1M)" },
   { id: "claude-opus-4-7",   label: "Opus 4.7" },
   { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   { id: "claude-haiku-4-5",  label: "Haiku 4.5" },
@@ -96,13 +98,15 @@ const MIME = {
  *
  * @param {Object}   opts
  * @param {number}   opts.port           HTTP port (e.g. 5180)
+ * @param {string}   opts.token          Shared secret required on /ws and /cli upgrades (see ws-auth.mjs)
  * @param {string}   opts.apiKey         Anthropic API key (already resolved)
- * @param {string}   opts.model          "claude-sonnet-4-6", etc.
+ * @param {string}   opts.model          "claude-sonnet-5", etc.
  * @param {Function} opts.callNovaTool   async (toolName, args) → result (Phase 3)
  * @param {Function} opts.log            (level, msg, data?) → void
  */
 export async function init(opts) {
-  const { port, apiKey, model: initialModel = "claude-sonnet-4-6", cliPermissionMode = "acceptEdits", callNovaTool, log, claudePath, getBridgeInfo } = opts;
+  const { port, token = null, apiKey, model: initialModel = "claude-sonnet-5", cliPermissionMode = "acceptEdits", callNovaTool, log, claudePath, getBridgeInfo } = opts;
+  if (!token) log("warn", "chat: no shared token configured — /ws and /cli are protected by Host/Origin checks only");
 
   // The currently-active model. Starts from the value `init()` was called
   // with (read by main.js from claudecode.chat.model), can be flipped at
@@ -284,6 +288,14 @@ export async function init(opts) {
         const cur = (env.PATH || "").split(":");
         env.PATH = [...new Set([...extra, ...cur])].filter(Boolean).join(":");
       }
+      // Point the subprocess at our own MCP bridge — the same two variables
+      // the "Launch Claude Code" command sets in an external terminal. Without
+      // them the -p process never discovers Nova and has no editor tools.
+      const bridge = getBridgeInfo ? getBridgeInfo() : null;
+      if (bridge && bridge.port) {
+        env.CLAUDE_CODE_SSE_PORT = String(bridge.port);
+        env.ENABLE_IDE_INTEGRATION = "true";
+      }
 
       let child;
       try {
@@ -378,6 +390,15 @@ export async function init(opts) {
   // ── HTTP server (static files) ─────────────────────────────────
   const httpServer = createServer(async (req, res) => {
     try {
+      // Static assets don't need the token (the page itself carries it in
+      // its URL), but a foreign Host/Origin is still refused — that's the
+      // DNS-rebinding defense.
+      const gate = authorizeRequest(req, { token, port, requireToken: false });
+      if (!gate.ok) {
+        log("warn", `chat http: refused ${req.method} ${req.url}: ${gate.reason}`);
+        res.writeHead(gate.status, { "content-type": "text/plain" });
+        return res.end(gate.reason);
+      }
       let path = (req.url || "/").split("?")[0];
       if (path === "/") path = "/index.html";
       if (path.includes("..")) {
@@ -415,10 +436,20 @@ export async function init(opts) {
   const wss = new WebSocketServer({ noServer: true });
   httpServer.on("upgrade", (req, socket, head) => {
     const path = (req.url || "").split("?")[0];
-    if (path === "/ws") {
-      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+    if (path === "/cli") return; // owned by cli-session.mjs (its own listener gates it)
+    if (path !== "/ws") {
+      // Nobody owns this path — close it instead of leaving the socket hanging.
+      rejectUpgrade(socket, 404, "no such endpoint");
+      return;
     }
-    // Other paths (e.g. /cli) are handled by other upgrade listeners.
+    // Host / Origin / token gate — see ws-auth.mjs for the threat model.
+    const gate = authorizeRequest(req, { token, port });
+    if (!gate.ok) {
+      log("warn", `chat: refused /ws upgrade from ${req.socket.remoteAddress}: ${gate.reason}`);
+      rejectUpgrade(socket, gate.status, gate.reason);
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   });
 
   wss.on("connection", (socket, req) => {

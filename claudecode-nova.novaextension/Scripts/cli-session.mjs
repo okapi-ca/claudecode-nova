@@ -15,8 +15,16 @@
 //                     { type: "exit", code: <n> }
 
 import { WebSocketServer } from "ws";
+import { authorizeRequest, rejectUpgrade } from "./ws-auth.mjs";
 
-export function attach({ httpServer, claudeCommand = "claude", claudeArgs = "", log = console.log }) {
+// Options :
+//   httpServer    — the chat-session HTTP server to mount /cli on
+//   port, token   — for the Host / Origin / token gate (see ws-auth.mjs);
+//                   a PTY running `claude` is the most sensitive endpoint
+//                   we expose, so the gate is mandatory here
+//   getBridgeInfo — () => { port } of the MCP bridge, so the spawned
+//                   `claude` auto-connects to Nova like an external terminal
+export function attach({ httpServer, port, token = null, claudeCommand = "claude", claudeArgs = "", getBridgeInfo = null, log = console.log }) {
   // Lazy-require node-pty so a missing native build doesn't kill the
   // chat path. If load fails we surface a friendly error to clients
   // and leave the rest of the server functional.
@@ -47,9 +55,14 @@ export function attach({ httpServer, claudeCommand = "claude", claudeArgs = "", 
   const wss = new WebSocketServer({ noServer: true });
   httpServer.on("upgrade", (req, socket, head) => {
     const path = (req.url || "").split("?")[0];
-    if (path === "/cli") {
-      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+    if (path !== "/cli") return; // chat-session.mjs owns /ws and 404s the rest
+    const gate = authorizeRequest(req, { token, port });
+    if (!gate.ok) {
+      log("warn", `cli: refused /cli upgrade from ${req.socket.remoteAddress}: ${gate.reason}`);
+      rejectUpgrade(socket, gate.status, gate.reason);
+      return;
     }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   });
 
   wss.on("connection", async (socket, req) => {
@@ -103,6 +116,13 @@ export function attach({ httpServer, claudeCommand = "claude", claudeArgs = "", 
     // extend it with the usual install locations so plain "claude"
     // resolves without forcing the user to configure an absolute path.
     const env = { ...process.env, TERM: "xterm-256color" };
+    // Same IDE-bridge variables the "Launch Claude Code" command sets in an
+    // external terminal, so the embedded `claude` connects to Nova too.
+    const bridge = getBridgeInfo ? getBridgeInfo() : null;
+    if (bridge && bridge.port) {
+      env.CLAUDE_CODE_SSE_PORT = String(bridge.port);
+      env.ENABLE_IDE_INTEGRATION = "true";
+    }
     if (!claudeCommand.startsWith("/")) {
       const home = process.env.HOME || "";
       const extra = [`${home}/.local/bin`, "/usr/local/bin", "/opt/homebrew/bin"];

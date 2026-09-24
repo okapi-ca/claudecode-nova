@@ -4,3 +4,21 @@ node_modules/
 .nova/
 .claude/
 CLAUDE.md
+
+# BEGIN flow managed — auto-synced by flow plugin.
+# Re-synced every SessionStart from the plugin source. Do not edit inside the fences.
+# Local customizations live in <stem>.local.md siblings (tracked in git).
+.claude/rules/flow.*.md
+!.claude/rules/flow.*.local.md
+.claude/templates/flow.*.md
+!.claude/templates/flow.*.local.md
+.claude/flow/flow.agent-contracts.detail.md
+.claude/flow/flow.architecture.architecture-references.detail.md
+.claude/flow/flow.cross-reference-conventions.detail.md
+.claude/flow/flow.engineering.feasibility-divergence-detector.detail.md
+.claude/flow/flow.engineering.review-standards.detail.md
+.claude/flow/flow.graph-aware-orchestration.detail.md
+.claude/flow/flow.planning.dedup-conventions.detail.md
+.claude/flow/flow.planning.roadmap-conventions.detail.md
+.claude/flow/flow.planning.tracker-conventions.detail.md
+# END flow managed

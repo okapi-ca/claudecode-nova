@@ -33,10 +33,52 @@ const IDE_NAME  = "Nova";
 // in main.js before spawning this subprocess).
 const CHAT_ENABLED = process.env.CC_CHAT_ENABLED === "1" || process.env.CC_CHAT_ENABLED === "true";
 const CHAT_PORT    = parseInt(process.env.CC_CHAT_PORT || "5180", 10);
-const CHAT_MODEL   = process.env.CC_CHAT_MODEL || "claude-sonnet-4-6";
+const CHAT_MODEL   = process.env.CC_CHAT_MODEL || "claude-sonnet-5";
 const CHAT_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+// Shared secret for the chat (/ws) and terminal (/cli) WebSockets. main.js
+// generates + persists it and passes it down; if it's ever missing we mint
+// one here and report it back in `chat_started` so main.js can build URLs.
+const CHAT_TOKEN   = process.env.CC_CHAT_TOKEN || crypto.randomUUID();
 let chatHandle = null;  // { port, stop() } once chat-session.mjs is initialized
 let cliHandle = null;   // { pushResumeRequest(sessionId), stop() } once cli-session.mjs is attached
+
+// Per-tool response deadlines. Most Nova tools answer in milliseconds, so
+// 30 s is a generous default. Two tools legitimately block on the human:
+//   - openDiff waits for Accept/Reject. main.js already auto-rejects diffs
+//     older than `claudecode.diffTimeoutMinutes` (sent here as
+//     CC_DIFF_TIMEOUT_MS, 0 = never), so we only keep a safety net one
+//     minute past that. Before this, a 30 s cap here silently timed out
+//     every diff the user took longer than half a minute to review, and
+//     the eventual Accept found no pending request to answer.
+//   - askUser blocks on a native modal.
+const TOOL_TIMEOUT_MS      = 30000;
+const ASK_USER_TIMEOUT_MS  = 10 * 60 * 1000;
+const DIFF_TIMEOUT_MS      = (() => {
+  const n = parseInt(process.env.CC_DIFF_TIMEOUT_MS || "", 10);
+  return Number.isFinite(n) && n >= 0 ? n : 31 * 60 * 1000;
+})();
+
+function toolTimeoutMs(toolName) {
+  if (toolName === "openDiff") return DIFF_TIMEOUT_MS;   // 0 → no deadline
+  if (toolName === "askUser")  return ASK_USER_TIMEOUT_MS;
+  return TOOL_TIMEOUT_MS;
+}
+
+// Arm a deadline for a pending tool call. Returns null when the tool has
+// no deadline (openDiff with diffTimeoutMinutes = 0).
+function armToolTimeout(toolName, onTimeout) {
+  const ms = toolTimeoutMs(toolName);
+  if (!ms) return null;
+  return setTimeout(onTimeout, ms);
+}
+
+// Bridge version advertised in the MCP `initialize` reply — read from the
+// manifest so it stops drifting (it was hardcoded at "0.2.0").
+const BRIDGE_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, "..", "extension.json"), "utf8")).version || "0.0.0";
+  } catch (_) { return "0.0.0"; }
+})();
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -316,7 +358,7 @@ function handleRequest(client, msg) {
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "nova-claudecode-bridge", version: "0.2.0" },
+        serverInfo: { name: "nova-claudecode-bridge", version: BRIDGE_VERSION },
       },
     });
     return;
@@ -355,12 +397,14 @@ function handleRequest(client, msg) {
       mcpId: id,
     });
 
-    // Store pending — Nova will respond with tool_result
+    // Store pending — Nova will respond with tool_result (or diff_response
+    // for openDiff). Deadline is per-tool: see toolTimeoutMs().
     pendingRequests[requestId] = {
       client,
       mcpId: id,
-      timeout: setTimeout(() => {
+      timeout: armToolTimeout(toolName, () => {
         delete pendingRequests[requestId];
+        log("warn", `Tool ${toolName} timed out after ${toolTimeoutMs(toolName)} ms`);
         sendWSMessage(client, {
           jsonrpc: "2.0",
           id,
@@ -368,7 +412,7 @@ function handleRequest(client, msg) {
             content: [{ type: "text", text: JSON.stringify({ error: "Tool call timed out" }) }],
           },
         });
-      }, 30000),
+      }),
     };
     return;
   }
@@ -386,7 +430,17 @@ function handleNotification(client, msg) {
 
   if (method === "notifications/initialized") {
     log("info", "Claude Code client initialized");
-    sendToNova({ type: "client_connected" });
+    sendToNova({ type: "client_connected", clientCount: connectedClients.length });
+    return;
+  }
+
+  // Claude Code announces its own process id right after the handshake
+  // (same as it does for the VS Code / JetBrains plugins). Remember it on
+  // the client so logs and the sidebar can name the session.
+  if (method === "ide_connected") {
+    client.pid = params && params.pid;
+    log("info", `Claude Code client identified (pid ${client.pid ?? "?"})`);
+    sendToNova({ type: "client_identified", pid: client.pid ?? null, clientCount: connectedClients.length });
     return;
   }
 
@@ -449,12 +503,12 @@ function formatToolResultPayload(result) {
 function callNovaTool(toolName, args) {
   return new Promise((resolve, reject) => {
     const requestId = `chat_req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const timeout = setTimeout(() => {
+    const timeout = armToolTimeout(toolName, () => {
       if (pendingRequests[requestId]) {
         delete pendingRequests[requestId];
-        reject(new Error(`Nova tool ${toolName} timed out`));
+        reject(new Error(`Nova tool ${toolName} timed out after ${toolTimeoutMs(toolName)} ms`));
       }
-    }, 30000);
+    });
     pendingRequests[requestId] = { kind: "chat", resolve, reject, timeout };
     sendToNova({
       type: "tool_call",
@@ -714,6 +768,7 @@ async function startServer() {
         const chatModule = await import("./chat-session.mjs");
         chatHandle = await chatModule.init({
           port: CHAT_PORT,
+          token: CHAT_TOKEN,
           apiKey: CHAT_API_KEY || null,
           model: CHAT_MODEL,
           cliPermissionMode: process.env.CC_CHAT_CLI_PERMISSION_MODE || "acceptEdits",
@@ -734,8 +789,11 @@ async function startServer() {
           const cliModule = await import("./cli-session.mjs");
           cliHandle = cliModule.attach({
             httpServer: chatHandle.httpServer,
+            port: CHAT_PORT,
+            token: CHAT_TOKEN,
             claudeCommand: process.env.CC_CLAUDE_PATH || "claude",
             claudeArgs: process.env.CC_CLAUDE_ARGS || "",
+            getBridgeInfo: () => ({ port: serverPort, clientCount: connectedClients.length }),
             log,
           });
           log("info", "CLI terminal panel attached at /cli");
@@ -743,7 +801,7 @@ async function startServer() {
           log("error", `Failed to attach CLI terminal panel: ${err.message}`);
         }
 
-        sendToNova({ type: "chat_started", port: CHAT_PORT });
+        sendToNova({ type: "chat_started", port: CHAT_PORT, token: CHAT_TOKEN });
       } catch (err) {
         log("error", `Failed to start chat server: ${err.message}`);
         sendToNova({ type: "chat_failed", message: err.message });

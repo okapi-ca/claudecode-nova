@@ -30,7 +30,7 @@ The Nova extension (`main.js`) spawns a Node.js subprocess (`ws-server.js`) that
 - **Opt-in embedded chat + terminal** — In-window chat (Anthropic SDK or `claude` CLI subprocess backend) and a real PTY-backed terminal panel, both running on a single localhost HTTP server
 - **24 slash commands** — Code-on-selection (`/explain`, `/refactor`, `/test`, `/doc`, `/fix`, `/review`, `/optimize`, `/simplify`, `/types`, `/security`, `/rename`), git-driven (`/commit`, `/changelog`, `/pr`), workspace (`/explain-error`, `/why`, `/search`, `/find`), conversation (`/plan`, `/recap`, `/clear`), documentation (`/spec`, `/readme`, `/api-doc`)
 - **Resume any session** — Click an entry in the Recent Sessions sidebar (or the chat's "Resume…" menu) to replay + continue any prior conversation from `~/.claude/projects/<workspace>/*.jsonl`
-- **Secure by default** — Localhost-only WebSocket with UUID token authentication; no data leaves the machine
+- **Secure by default** — Localhost-only servers; the MCP bridge, the chat and the embedded terminal each require a secret token, and the chat/terminal WebSockets also refuse foreign `Origin`/`Host` headers. No data leaves the machine
 
 ## Modes — Chat (web) and CLI panel (in-browser terminal)
 
@@ -52,7 +52,7 @@ What both modes have in common:
    - *Conversation* — `/plan` (decompose a task into steps), `/recap` (summarize the session), `/clear` (frontend-only history wipe)
    - *Documentation* — `/spec`, `/readme`, `/api-doc`
 - "Auto-inject context" toggle that prepends the current Nova selection + file path to every prompt
-- Live model picker (Sonnet 4.6 / Haiku 4.5 / Opus 4.7 / Opus 4.8 1M) — switch mid-conversation, no restart
+- Live model picker (Sonnet 5 / Fable 5.1 / Opus 5.5 / Opus 4.8 1M / Opus 4.7 / Sonnet 4.6 / Haiku 4.5; in SDK mode the list is discovered from the API) — switch mid-conversation, no restart
 - Streaming `💭 Reasoning…` collapsible block while Claude thinks before answering
 - "Resume…" button — lists per-workspace sessions from `~/.claude/projects/<encoded-cwd>/*.jsonl`, click replays the full transcript and continues with `--resume`
 - Theme follows macOS / Nova appearance (`prefers-color-scheme`) with a manual override setting (`claudecode.chat.theme`) if Nova's locked to a different mode
@@ -200,6 +200,7 @@ Access these from **Extensions → Claude Code Bridge** or the Command Palette:
 | Open Claude Chat in Browser | Open the chat UI URL in your default browser (or use the action panel to pick Nova Preview / copy URL) |
 | Set Claude Chat API Key (Keychain) | Store an Anthropic API key in macOS Keychain — survives reinstalls and isn't readable from Nova settings |
 | Clear Claude Chat API Key (Keychain) | Remove the stored key |
+| Rotate Claude Chat Access Token | Mint a new secret for the chat / terminal WebSockets and restart the bridge (reopen chat tabs afterwards) |
 | Check for Claude Code Updates | Force a check of the configured npm dist-tag (stable / next) |
 
 ## Configuration
@@ -217,9 +218,9 @@ Access these from **Extensions → Claude Code Bridge** or the Command Palette:
 | `claudecode.terminalApp` | `auto` | Where *Launch Claude Code* opens the CLI: `auto`, `iTerm`, `Terminal`, or `clipboard`. Other terminals (Warp, Ghostty, Hyper) fall back to clipboard automatically. |
 | `claudecode.updateCheck.autoCheck` | `true` | Daily background check of npm for new Claude Code CLI versions |
 | `claudecode.updateCheck.channel` | `stable` | `stable` (npm `latest`) or `next` (npm `@next` pre-releases) |
-| `claudecode.chat.enabled` | `false` | Opt-in to the embedded chat UI (Mode B). When enabled, the chat HTTP server starts on `claudecode.chat.port`. |
-| `claudecode.chat.port` | `5180` | Fixed port for the chat HTTP server (so Nova's Preview URL stays stable) |
-| `claudecode.chat.model` | `claude-sonnet-4-6` | Default chat model — Sonnet 4.6 / Haiku 4.5 / Opus 4.7 / Opus 4.8 (1M ctx). Switchable mid-conversation in the UI. |
+| `claudecode.chat.enabled` | `false` | Opt-in to the embedded chat UI (Mode B). When enabled, the chat HTTP server starts on `claudecode.chat.port`. Works with an Anthropic API key (SDK mode) or, without one, through your Claude Code CLI login (OAuth mode). |
+| `claudecode.chat.port` | `5180` | Fixed port for the chat HTTP server. Always open it through the *Open Claude Chat in Browser* command: the URL it hands out carries the private access token the `/ws` and `/cli` WebSockets require. |
+| `claudecode.chat.model` | `claude-sonnet-5` | Default chat model — Sonnet 5 / Fable 5.1 / Opus 5.5 / Opus 4.8 (1M ctx) / Opus 4.7 / Sonnet 4.6 / Haiku 4.5. Switchable mid-conversation in the UI. |
 | `claudecode.chat.theme` | `auto` | `auto` follows `prefers-color-scheme`. Set to `dark` or `light` if Nova is locked to a theme that doesn't match macOS. |
 | `claudecode.chat.keychainService` | `ca.okapi.claudecode-nova` | macOS Keychain service identifier for the API key. Point to another service (e.g. `com.anthropic.claudefordesktop`) to reuse an existing entry. |
 | `claudecode.chat.keychainAccount` | `anthropic-api-key` | Account name within the Keychain service above |
@@ -306,8 +307,9 @@ claudecode-nova.novaextension/
 
 ### Security
 
-- WebSocket server binds to `127.0.0.1` only (no network exposure)
-- Every connection requires the UUID auth token in the `x-claude-code-ide-authorization` header
+- Both servers bind to `127.0.0.1` only (no network exposure)
+- **MCP bridge** — every connection requires the UUID auth token in the `x-claude-code-ide-authorization` header (the same mechanism the official plugins use)
+- **Chat + terminal** (`/ws`, `/cli`) — every WebSocket upgrade must carry a per-install secret (`?token=…`, constant-time compared), a `Host` header naming this loopback server (defeats DNS rebinding), and, when a browser sends one, an `Origin` equal to the chat's own origin (defeats cross-site WebSocket hijacking). The token is stored in the extension's global storage and travels only in URLs the extension itself produces; *Rotate Claude Chat Access Token* replaces it.
 - Lock files are removed on clean shutdown
 - No data leaves your machine — all communication is local IPC
 
