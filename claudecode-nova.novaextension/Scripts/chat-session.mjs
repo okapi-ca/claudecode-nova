@@ -43,11 +43,10 @@ import { listSessions, streamSessionTranscript } from "./list-sessions.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CHAT_UI_DIR = join(__dirname, "chat-ui");
 
-// Fallback model list — the single source of truth for the chat model
-// picker when /v1/models is unavailable. CLI/OAuth mode has no API key,
-// so it always lands here; SDK mode also falls back if the fetch fails.
-// Keep the newest / most capable first. When a new model ships, adding
-// it here is the one manual edit that keeps CLI-mode users current.
+// Last-resort model list for the chat picker, used only when neither the
+// Anthropic /v1/models endpoint (SDK mode) nor Claude Code's own
+// supportedModels() (both modes, via the user's `claude`) could be reached.
+// Keep the newest / most capable first.
 const FALLBACK_MODELS = [
   { id: "claude-fable-5-1",  label: "Fable 5.1" },
   { id: "claude-opus-5-5",   label: "Opus 5.5" },
@@ -146,16 +145,6 @@ export async function init(opts) {
   const PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"];
   const permissionMode = PERMISSION_MODES.includes(cliPermissionMode) ? cliPermissionMode : "acceptEdits";
   log("info", `chat: permission mode ${permissionMode}`);
-
-  // Model list that feeds the chat UI's picker. SDK mode asks the API so
-  // the picker auto-discovers new models; CLI/OAuth mode has no key and
-  // keeps the curated fallback list. Computed once — the same list is
-  // pushed to every client in its `config` message.
-  const availableModels =
-    (chatMode === "sdk" ? await fetchModels(apiKey, log) : null) || FALLBACK_MODELS;
-  // Note: in OAuth mode the picker is the curated fallback list; the SDK's
-  // supportedModels() could replace it later, once the session is live.
-  log("info", `chat: ${availableModels.length} models offered to the picker (${chatMode === "sdk" && availableModels !== FALLBACK_MODELS ? "discovered" : "fallback"})`);
 
   const { server: novaServer, toolNames: allowedToolNames } = buildNovaToolsServer({ callNovaTool, log });
   log("info", `chat: ${allowedToolNames.length} Nova tools exposed to SDK`);
@@ -312,6 +301,89 @@ export async function init(opts) {
     if (chatMode === "oauth") delete env.ANTHROPIC_API_KEY;
     return env;
   }
+
+  // Ask the user's Claude Code which models it offers — the same list its
+  // own /model picker shows, aliases resolved to canonical ids. Works with
+  // the OAuth login (no API key needed). Spawns a short-lived idle session
+  // (~0.7 s) purely for the control request; nothing is sent to a model.
+  async function discoverModelsViaSdk() {
+    if (!claudeExe) return null;
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    async function* idle() { await gate; }
+    const abort = new AbortController();
+    const timer = setTimeout(() => { try { abort.abort(); } catch (_) {} }, 8000);
+    let q;
+    try {
+      q = query({ prompt: idle(), options: {
+        cwd: process.env.CC_WORKSPACE || process.cwd(),
+        env: claudeEnv(),
+        pathToClaudeCodeExecutable: claudeExe,
+        settingSources: [],
+        tools: [],
+        abortController: abort,
+        stderr: () => {},
+      } });
+      // Drain the event stream in the background so the SDK's reader never
+      // blocks; it ends when we abort below.
+      const drain = (async () => { try { for await (const _ of q) { /* idle */ } } catch (_) {} })();
+      const raw = await q.supportedModels();
+      release(); abort.abort();
+      await Promise.race([drain, new Promise((r) => setTimeout(r, 1500))]);
+      return normalizeSdkModels(raw);
+    } catch (err) {
+      log("warn", `chat: supportedModels() failed: ${err.message} — using fallback model list`);
+      try { release(); abort.abort(); } catch (_) {}
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // ModelInfo[] → picker entries. Aliases ("default", "opus", "sonnet",
+  // "haiku") resolve to the same canonical ids as explicit entries; keep
+  // one row per canonical id, in Claude Code's order, and flag the one the
+  // CLI calls "default" as recommended.
+  function normalizeSdkModels(raw) {
+    if (!Array.isArray(raw) || raw.length === 0) return null;
+    const byId = new Map();
+    let recommended = null;
+    for (const m of raw) {
+      const id = m?.resolvedModel || m?.value;
+      if (typeof id !== "string" || !id) continue;
+      if (m.value === "default") { recommended = id; continue; }
+      const isAlias = m.value !== id;
+      const existing = byId.get(id);
+      if (!existing || (existing.isAlias && !isAlias)) {
+        byId.set(id, { id, label: m.displayName || id.replace(/^claude-/, ""), description: m.description || "", isAlias });
+      }
+    }
+    const models = [...byId.values()].map(({ isAlias, ...m }) => (
+      m.id === recommended ? { ...m, label: `${m.label} · recommended` } : m
+    ));
+    // Claude Code lists its aliases first (opus, sonnet…); surface the one it
+    // calls default at the top of the picker instead.
+    const i = models.findIndex((m) => m.id === recommended);
+    if (i > 0) models.unshift(...models.splice(i, 1));
+    return models.length ? models : null;
+  }
+
+  // Model list that feeds the chat UI's picker, computed once and pushed
+  // to every client in its `config` message.
+  //   sdk   → Anthropic /v1/models (what the key can reach), else SDK, else fallback
+  //   oauth → Claude Code's own list via supportedModels(), else fallback
+  let availableModels = null;
+  let modelsSource = "fallback";
+  if (chatMode === "sdk") {
+    availableModels = await fetchModels(apiKey, log);
+    if (availableModels) modelsSource = "api";
+  }
+  if (!availableModels) {
+    availableModels = await discoverModelsViaSdk();
+    if (availableModels) modelsSource = "sdk";
+  }
+  if (!availableModels) availableModels = FALLBACK_MODELS;
+  log("info", `chat: ${availableModels.length} models offered to the picker (source: ${modelsSource})`);
 
   // Extend PATH the way Nova's stripped subprocess PATH needs when spawning
   // the CLI by bare name (used by `claude agents --json` below).
@@ -603,6 +675,7 @@ export async function init(opts) {
       type: "config",
       defaultModel: model,
       models: availableModels,
+      modelsSource,
       mode: chatMode,
       permissionMode,
       claudeAvailable: !!claudeExe,

@@ -54,7 +54,7 @@ What both modes have in common:
    - *Conversation* — `/plan` (decompose a task into steps), `/recap` (summarize the session), `/clear` (frontend-only history wipe)
    - *Documentation* — `/spec`, `/readme`, `/api-doc`
 - "Auto-inject context" toggle that prepends the current Nova selection + file path to every prompt
-- Live model picker (Sonnet 5 / Fable 5.1 / Opus 5.5 / Opus 4.8 1M / Opus 4.7 / Sonnet 4.6 / Haiku 4.5; in SDK mode the list is discovered from the API) — switch mid-conversation, no restart
+- Live model picker, discovered at startup — from your Claude Code install in OAuth mode (the same list as its `/model` command, with descriptions), from the Anthropic API in SDK mode — switch mid-conversation, no restart
 - Streaming `💭 Reasoning…` collapsible block while Claude thinks before answering
 - "Resume…" button — lists per-workspace sessions from `~/.claude/projects/<encoded-cwd>/*.jsonl`, click replays the full transcript and continues with `--resume`
 - Theme follows macOS / Nova appearance (`prefers-color-scheme`) with a manual override setting (`claudecode.chat.theme`) if Nova's locked to a different mode
@@ -244,7 +244,7 @@ Access these from **Extensions → Claude Code Bridge** or the Command Palette:
 | `claudecode.updateCheck.channel` | `stable` | `stable` (npm `latest`) or `next` (npm `@next` pre-releases) |
 | `claudecode.chat.enabled` | `false` | Opt-in to the embedded chat UI (Mode B). When enabled, the chat HTTP server starts on `claudecode.chat.port`. Works with an Anthropic API key (SDK mode) or, without one, through your Claude Code CLI login (OAuth mode). |
 | `claudecode.chat.port` | `5180` | Fixed port for the chat HTTP server. Always open it through the *Open Claude Chat in Browser* command: the URL it hands out carries the private access token the `/ws` and `/cli` WebSockets require. |
-| `claudecode.chat.model` | `claude-sonnet-5` | Default chat model — Sonnet 5 / Fable 5.1 / Opus 5.5 / Opus 4.8 (1M ctx) / Opus 4.7 / Sonnet 4.6 / Haiku 4.5. Switchable mid-conversation in the UI. |
+| `claudecode.chat.model` | `claude-sonnet-5` | Default chat model. The picker's options are discovered from your Claude Code install (OAuth) or the Anthropic API (SDK); a curated list is the last resort. Switchable mid-conversation in the UI. |
 | `claudecode.chat.theme` | `auto` | `auto` follows `prefers-color-scheme`. Set to `dark` or `light` if Nova is locked to a theme that doesn't match macOS. |
 | `claudecode.chat.keychainService` | `ca.okapi.claudecode-nova` | macOS Keychain service identifier for the API key. Point to another service (e.g. `com.anthropic.claudefordesktop`) to reuse an existing entry. |
 | `claudecode.chat.keychainAccount` | `anthropic-api-key` | Account name within the Keychain service above |

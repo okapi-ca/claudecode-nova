@@ -312,7 +312,7 @@
         ["claude-haiku-4-5", "Haiku 4.5 (fastest, lowest cost)"]
       ],
       "default": "claude-sonnet-5",
-      "description": "Default model for the chat UI; switchable mid-conversation from the picker. In SDK mode the picker lists whatever your API key can reach; in CLI/OAuth mode it uses this curated list."
+      "description": "Default model for the chat UI; switchable mid-conversation from the picker. The picker itself is discovered at startup: from the Anthropic API in SDK mode, from your Claude Code install (the same list as its /model command) in OAuth mode. This curated list is only the last resort."
     },
     {
       "key": "claudecode.chat.port",

@@ -1921,7 +1921,8 @@ function stripModelSuffix(m) {
 
 // Rebuild the model picker's <option>s from the server-supplied list
 // (config.models). The server is the source of truth — SDK mode discovers
-// models from /v1/models, CLI mode sends a curated fallback. Falls back to
+// models from /v1/models, OAuth mode asks Claude Code itself
+// (supportedModels()), and a curated list is the last resort. Falls back to
 // the HTML's hardcoded options if the list is empty/missing. Preserves the
 // current selection when the same id survives the rebuild.
 function populateModelPicker(models) {
@@ -1933,6 +1934,7 @@ function populateModelPicker(models) {
     const opt = document.createElement("option");
     opt.value = m.id;
     opt.textContent = m.label || m.id.replace(/^claude-/, "");
+    if (m.description) opt.title = m.description;
     modelPicker.appendChild(opt);
   }
   if (prev) selectModelValue(prev);

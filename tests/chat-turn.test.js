@@ -98,7 +98,13 @@ async function main() {
   try {
     await c.open();
     const cfg = await c.next((m) => m.type === "config", 5000);
-    check("config announces oauth mode + permissionMode default", cfg.mode === "oauth" && cfg.permissionMode === "default", cfg);
+    check("config announces oauth mode + permissionMode default", cfg.mode === "oauth" && cfg.permissionMode === "default", { mode: cfg.mode, permissionMode: cfg.permissionMode });
+    check("model list discovered from Claude Code (supportedModels), canonical ids, deduplicated",
+      cfg.modelsSource === "sdk" && Array.isArray(cfg.models) && cfg.models.length >= 5 &&
+      cfg.models.every((m) => /^claude-/.test(m.id)) &&
+      new Set(cfg.models.map((m) => m.id)).size === cfg.models.length &&
+      cfg.models.some((m) => / · recommended$/.test(m.label)),
+      { source: cfg.modelsSource, models: (cfg.models || []).map((m) => m.id + " = " + m.label) });
 
     // 1. first turn
     const t0 = Date.now();
