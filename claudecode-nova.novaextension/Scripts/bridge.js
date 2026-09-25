@@ -148,11 +148,23 @@ async function startBridge() {
   });
 
   S.serverProcess.onStderr(function(data) {
-    console.warn("Claude Code Bridge [server stderr]: " + data.trim());
+    var text = String(data).trim();
+    console.warn("Claude Code Bridge [server stderr]: " + text);
+    // Keep the last few lines so a crash notification can quote the cause.
+    text.split("\n").forEach(function(line) {
+      if (!line.trim()) return;
+      S.crashRestart.lastStderr.push(line.trim());
+      if (S.crashRestart.lastStderr.length > 5) S.crashRestart.lastStderr.shift();
+    });
   });
 
   S.serverProcess.onDidExit(function(exitCode) {
     console.log("Claude Code Bridge: server exited with code " + exitCode);
+    // A crash (SIGKILL, uncaught exception) skips ws-server's own lock
+    // cleanup; a stale ~/.claude/ide/<port>.lock would then keep pointing
+    // Claude Code and hook-relay.sh at a dead port. Remove it here — the
+    // port was ours and the process is gone.
+    if (!S.stopRequested && S.serverPort) removeStaleLock(S.serverPort);
     S.serverProcess = null;
     S.serverPort = null;
     S.isConnected = false;
@@ -166,12 +178,14 @@ async function startBridge() {
       S.chatState.state = "stopped";
       R.Sidebar.refreshChatStatusSidebar();
     }
-    if (exitCode !== 0) {
-      R.Util.showNotification("Server Stopped", "WebSocket server exited with code " + exitCode + ". Check Extension Console for details.");
-    }
+    if (S.stopRequested) return;   // Stop / Restart / deactivate: nothing to recover
+    scheduleCrashRestart(exitCode);
   });
 
   try {
+    S.stopRequested = false;
+    S.serverStartedAt = Date.now();
+    S.crashRestart.lastStderr = [];
     S.serverProcess.start();
     console.log("Claude Code Bridge: process started successfully");
   } catch (err) {
@@ -195,6 +209,11 @@ async function startBridge() {
 }
 
 function stopBridge() {
+  S.stopRequested = true;
+  if (S.crashRestart.timer) {
+    clearTimeout(S.crashRestart.timer);
+    S.crashRestart.timer = null;
+  }
   if (S.serverProcess) {
     console.log("Claude Code Bridge: stopping server…");
     try { S.serverProcess.terminate(); } catch (_) {}
@@ -206,6 +225,70 @@ function stopBridge() {
     R.Sidebar.updateSidebar();
     R.Util.showNotification("Stopped", "Claude Code Bridge has been stopped.");
   }
+}
+
+function removeStaleLock(port) {
+  try {
+    var configDir = nova.environment["CLAUDE_CONFIG_DIR"] || nova.path.join(nova.environment["HOME"], ".claude");
+    var lockPath = nova.path.join(configDir, "ide", port + ".lock");
+    if (nova.fs.stat(lockPath)) {
+      nova.fs.remove(lockPath);
+      console.log("Claude Code Bridge: removed stale lock " + lockPath);
+    }
+  } catch (err) {
+    console.warn("Claude Code Bridge: could not remove stale lock for port " + port + ": " + err.message);
+  }
+}
+
+// The helper died on us (not a Stop / Restart / reload). Relaunch it with
+// backoff — 1 s, 2 s, 4 s — up to CRASH_RESTART_MAX times. A server that
+// stayed up for CRASH_RESTART_WINDOW_MS before dying resets the count, so a
+// rare crash every few hours is always recovered; a crash-at-startup loop
+// (bad node path, port squatted, syntax error) stops after three tries with
+// one notification that quotes the last stderr line instead of spamming.
+// The chat token is persistent and Claude Code re-reads the lock file, so
+// the CLI and the chat panel reconnect on their own after a relaunch.
+function scheduleCrashRestart(exitCode) {
+  var now = Date.now();
+  var lived = now - (S.serverStartedAt || now);
+  if (lived >= S.CRASH_RESTART_WINDOW_MS) S.crashRestart.attempts = 0;
+  S.crashRestart.attempts += 1;
+
+  var lastErr = S.crashRestart.lastStderr.length
+    ? S.crashRestart.lastStderr[S.crashRestart.lastStderr.length - 1]
+    : null;
+
+  if (S.crashRestart.attempts > S.CRASH_RESTART_MAX) {
+    console.error("Claude Code Bridge: server crashed " + S.CRASH_RESTART_MAX
+      + " times within a minute — giving up. Last stderr: " + (lastErr || "(none)"));
+    R.Util.showNotification(
+      "Server keeps crashing",
+      "ws-server.js exited " + S.CRASH_RESTART_MAX + " times in a row (last exit code " + exitCode + ").\n"
+        + (lastErr ? "Last error: " + lastErr + "\n" : "")
+        + "Not retrying. Fix the cause, then run \"Restart Claude Code Bridge\"."
+    );
+    S.crashRestart.attempts = 0;
+    return;
+  }
+
+  var delay = S.CRASH_RESTART_BASE_DELAY_MS * Math.pow(2, S.crashRestart.attempts - 1);
+  console.warn("Claude Code Bridge: server exited unexpectedly (code " + exitCode + ") after "
+    + Math.round(lived / 1000) + " s — restarting in " + delay + " ms (attempt "
+    + S.crashRestart.attempts + "/" + S.CRASH_RESTART_MAX + ")" + (lastErr ? ". Last stderr: " + lastErr : ""));
+  R.Util.showNotification(
+    "Server crashed — restarting",
+    "ws-server.js exited with code " + exitCode + ". Relaunching in " + (delay / 1000) + " s (attempt "
+      + S.crashRestart.attempts + "/" + S.CRASH_RESTART_MAX + ")." + (lastErr ? "\n" + lastErr : "")
+  );
+
+  if (S.crashRestart.timer) clearTimeout(S.crashRestart.timer);
+  S.crashRestart.timer = setTimeout(function() {
+    S.crashRestart.timer = null;
+    if (S.stopRequested || S.serverProcess) return;   // stopped or relaunched meanwhile
+    startBridge().catch(function(err) {
+      console.error("Claude Code Bridge: crash restart failed:", err.message);
+    });
+  }, delay);
 }
 
 // Stop + start with a short delay so the OS releases the port before we rebind.
@@ -344,5 +427,6 @@ R.Bridge = Object.assign(R.Bridge || {}, {
   sendToServer,
   handleServerMessage,
   showStatus,
+  scheduleCrashRestart,
 });
 module.exports = R.Bridge;

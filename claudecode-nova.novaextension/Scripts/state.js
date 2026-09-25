@@ -113,6 +113,23 @@ S.sessionsWatcher = null;
 // JSONL events in quick succession.
 S.sessionsRefreshTimer = null;
 
+// Crash recovery for the ws-server subprocess (bridge.js). stopRequested
+// distinguishes an exit we asked for (Stop / Restart / deactivate — Nova
+// reloads the extension on every file change) from a crash. Only crashes
+// are retried, with backoff and a cap; lastStderr keeps the tail of the
+// helper's stderr so the give-up notification can say why.
+S.stopRequested = false;
+
+S.serverStartedAt = 0;
+
+S.crashRestart = { attempts: 0, timer: null, lastStderr: [] };
+
+S.CRASH_RESTART_MAX = 3;            // attempts before giving up…
+
+S.CRASH_RESTART_WINDOW_MS = 60000;  // …unless the server lived this long
+
+S.CRASH_RESTART_BASE_DELAY_MS = 1000;   // 1 s, 2 s, 4 s
+
 // Live Claude Code sessions reported through the hook relay (hooks.js).
 // Keyed by session_id → { sessionId, cwd, state, tool, lastMessage,
 // lastError, model, permissionMode, startedAt, updatedAt, fromChat }.

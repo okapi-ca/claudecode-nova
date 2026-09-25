@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- **The bridge relaunches its helper after a crash.** When `ws-server.js`
+  exits without being asked (SIGKILL, uncaught exception), the extension
+  used to post "Server Stopped" and leave the bridge, the chat and the CLI
+  panel dead until someone clicked Restart. It now relaunches with backoff
+  (1 s, 2 s, 4 s), at most three times per minute; a helper that lived a
+  minute before dying resets the count, so an occasional crash is always
+  recovered while a crash-at-startup loop stops after three tries with one
+  notification that quotes the helper's last stderr line. Stops, restarts
+  and Nova's own extension reloads are never retried. The stale
+  `~/.claude/ide/<port>.lock` a killed helper leaves behind is removed on
+  relaunch. Claude Code re-reads the lock file and the chat token is
+  persistent, so the CLI and the chat panel reconnect on their own.
+
 ### Fixed
 
 - **Chat panel stuck on "Disconnected — reconnecting…" after the 0.24.0
