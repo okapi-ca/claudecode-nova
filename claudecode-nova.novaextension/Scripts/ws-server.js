@@ -39,6 +39,53 @@ const CHAT_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 // generates + persists it and passes it down; if it's ever missing we mint
 // one here and report it back in `chat_started` so main.js can build URLs.
 const CHAT_TOKEN   = process.env.CC_CHAT_TOKEN || crypto.randomUUID();
+
+// getDiagnostics fallback: Nova has no API for other extensions' LSP
+// diagnostics, so we answer this tool here by running the project's own
+// linters (tsc / eslint / ruff — see diagnostics.js). main.js is told about
+// each call so it still shows up in the sidebar's Tool Calls log.
+const DIAGNOSTICS_ENABLED = process.env.CC_DIAGNOSTICS !== "0";
+const DIAGNOSTICS_TIMEOUT_MS = (() => {
+  const n = parseInt(process.env.CC_DIAGNOSTICS_TIMEOUT_MS || "", 10);
+  return Number.isFinite(n) && n >= 1000 ? n : 20000;
+})();
+let diagnosticsModule = null;
+function diagnostics() {
+  if (!diagnosticsModule) diagnosticsModule = require("./diagnostics.js");
+  return diagnosticsModule;
+}
+
+// Returns the MCP result payload for getDiagnostics, or null when the
+// fallback is disabled (caller then forwards to Nova as before).
+async function runLocalDiagnostics(args) {
+  if (!DIAGNOSTICS_ENABLED) return null;
+  const started = Date.now();
+  let result;
+  try {
+    result = await diagnostics().runDiagnostics({
+      workspace: WORKSPACE,
+      uri: args && args.uri,
+      timeoutMs: DIAGNOSTICS_TIMEOUT_MS,
+      log,
+    });
+  } catch (err) {
+    log("error", `diagnostics: ${err.message}`);
+    result = { files: [], sources: [], summary: `diagnostics failed: ${err.message}` };
+  }
+  const total = result.files.reduce((n, f) => n + f.diagnostics.length, 0);
+  sendToNova({
+    type: "tool_call_local",
+    tool: "getDiagnostics",
+    arguments: args || {},
+    result: { count: total, files: result.files.length, summary: result.summary, ms: Date.now() - started },
+  });
+  return {
+    content: [
+      { type: "text", text: JSON.stringify(result.files) },
+      { type: "text", text: `Sources — ${result.summary || "no linter detected in workspace"}` },
+    ],
+  };
+}
 let chatHandle = null;  // { port, stop() } once chat-session.mjs is initialized
 let cliHandle = null;   // { pushResumeRequest(sessionId), stop() } once cli-session.mjs is attached
 
@@ -61,6 +108,7 @@ const DIFF_TIMEOUT_MS      = (() => {
 function toolTimeoutMs(toolName) {
   if (toolName === "openDiff") return DIFF_TIMEOUT_MS;   // 0 → no deadline
   if (toolName === "askUser")  return ASK_USER_TIMEOUT_MS;
+  if (toolName === "getDiagnostics") return Math.max(TOOL_TIMEOUT_MS, DIAGNOSTICS_TIMEOUT_MS + 5000);
   return TOOL_TIMEOUT_MS;
 }
 
@@ -338,7 +386,7 @@ registerTool("getDiagnostics", {
   properties: {
     uri: { type: "string", description: "File URI to get diagnostics for. If not provided, gets diagnostics for all files." },
   },
-}, "Get language diagnostics from the editor");
+}, "Get language diagnostics for the workspace: runs the project's own linters (TypeScript tsc, ESLint, Ruff — whichever are configured) and returns their errors and warnings. Pass a file URI to scope to one file.");
 
 registerTool("close_tab", {
   type: "object",
@@ -429,6 +477,13 @@ function handleRequest(client, msg) {
         jsonrpc: "2.0",
         id,
         error: { code: -32601, message: `Unknown tool: ${toolName}` },
+      });
+      return;
+    }
+
+    if (toolName === "getDiagnostics" && DIAGNOSTICS_ENABLED) {
+      runLocalDiagnostics(toolArgs).then((payload) => {
+        sendWSMessage(client, { jsonrpc: "2.0", id, result: payload });
       });
       return;
     }
@@ -548,6 +603,7 @@ function formatToolResultPayload(result) {
 // MCP-shaped payload when main.js sends back the tool_result. Shares the
 // pendingRequests map with the MCP path via `kind: "chat"`.
 function callNovaTool(toolName, args) {
+  if (toolName === "getDiagnostics" && DIAGNOSTICS_ENABLED) return runLocalDiagnostics(args);
   return new Promise((resolve, reject) => {
     const requestId = `chat_req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const timeout = armToolTimeout(toolName, () => {

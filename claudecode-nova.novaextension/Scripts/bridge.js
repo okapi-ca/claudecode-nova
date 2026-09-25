@@ -72,6 +72,13 @@ async function startBridge() {
     CC_DIFF_TIMEOUT_MS: String(diffMinutes === 0 ? 0 : diffMinutes * 60000 + 60000),
   };
 
+  // getDiagnostics fallback (project linters run by ws-server.js).
+  var diagEnabled = nova.config.get("claudecode.diagnostics.enabled");
+  env.CC_DIAGNOSTICS = diagEnabled === false ? "0" : "1";
+  var diagSeconds = nova.config.get("claudecode.diagnostics.timeoutSeconds");
+  if (typeof diagSeconds !== "number" || !(diagSeconds >= 1)) diagSeconds = 20;
+  env.CC_DIAGNOSTICS_TIMEOUT_MS = String(Math.round(diagSeconds * 1000));
+
   if (nova.config.get("claudecode.chat.enabled")) {
     try {
       const apiKey = await R.Chat.resolveChatApiKey();
@@ -353,6 +360,13 @@ function handleServerMessage(msg) {
 
     case "tool_call":
       R.Tools.handleToolCall(msg);
+      break;
+
+    case "tool_call_local":
+      // Served inside ws-server.js (getDiagnostics via project linters);
+      // logged here so it appears in the sidebar's Tool Calls group.
+      R.Activity.logToolCall(msg.tool, msg.arguments, msg.result);
+      R.Sidebar.refreshActivitySidebar();
       break;
 
     case "log":

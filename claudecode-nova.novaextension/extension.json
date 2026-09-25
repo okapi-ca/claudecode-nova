@@ -260,6 +260,22 @@
       "description": "Which npm dist-tag to compare against. \"next\" surfaces pre-release versions."
     },
     {
+      "key": "claudecode.diagnostics.enabled",
+      "title": "Answer getDiagnostics with the project's linters",
+      "type": "boolean",
+      "default": true,
+      "description": "Nova exposes no API for other extensions' diagnostics, so the bridge runs the linters the project already has — TypeScript (tsconfig.json + tsc), ESLint (eslint.config.* / .eslintrc*), Ruff (pyproject.toml / ruff.toml) — and returns their errors and warnings to Claude. Off → the tool returns an empty list as before."
+    },
+    {
+      "key": "claudecode.diagnostics.timeoutSeconds",
+      "title": "Linter time budget (seconds)",
+      "type": "number",
+      "default": 20,
+      "min": 1,
+      "max": 120,
+      "description": "Deadline for the slowest linter on one getDiagnostics call. A linter that exceeds it is reported to Claude as \"timeout\" rather than as zero issues. Results are cached for a few seconds, so repeated calls after one edit pay once."
+    },
+    {
       "key": "claudecode.hooks.notifyWaiting",
       "title": "Notify when Claude is waiting for you",
       "type": "boolean",

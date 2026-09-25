@@ -160,7 +160,7 @@ Two surfaces use tools:
 | `getWorkspaceFolders` | ✅ Full | ✓ | ✓ | Workspace folder paths |
 | `checkDocumentDirty` | ✅ Full | ✓ | ✓ | Check for unsaved changes in a file |
 | `saveDocument` | ✅ Full | ✓ | ✓ | Save a document |
-| `getDiagnostics` | ⚠️ Partial | ✓ | ✓ | Requires LSP extension cooperation (see Limitations) |
+| `getDiagnostics` | ✅ Full (via project linters) | ✓ | ✓ | Nova has no API for other extensions' diagnostics, so the bridge runs the linters the project already has — TypeScript (`tsconfig.json` + `tsc`), ESLint (`eslint.config.*` / `.eslintrc*`), Ruff (`pyproject.toml` / `ruff.toml`) — in parallel under a time budget and returns errors + warnings in the protocol shape, plus a per-linter summary line (so "no linter configured" never reads as "no errors"). Optional `uri` scopes to one file. See [Known Limitations §2](#known-limitations). |
 | `closeAllDiffTabs` | ⚠️ Best-effort | ✓ | ✓ | Removes our temporary `proposed_*` files; cannot close Nova editor tabs because Nova has no public tab-management API |
 | `getGitDiff` | ✅ Full | — | ✓ | `git diff` in the workspace (optional `staged` / `range` / `stat`, 64 KB cap). Drives `/commit`, `/changelog`, `/pr`. |
 | `getGitLog` | ✅ Full | — | ✓ | `git log` with `range`, `limit`, `format` (oneline / subject / full). Drives `/changelog`, `/pr`. |
@@ -231,6 +231,8 @@ Access these from **Extensions → Claude Code Bridge** or the Command Palette:
 | `claudecode.updateCheck.channel` | `stable` | `stable` (npm `latest`) or `next` (npm `@next` pre-releases) |
 | `claudecode.hooks.notifyWaiting` | `true` | With the hooks installed, notify when a session blocks on a permission prompt or a question (chat-panel sessions excluded) |
 | `claudecode.hooks.notifyOnStop` | `false` | With the hooks installed, notify with the first line of the reply when a session finishes a turn |
+| `claudecode.diagnostics.enabled` | `true` | Answer `getDiagnostics` by running the project's linters (tsc / ESLint / Ruff). Off → empty list |
+| `claudecode.diagnostics.timeoutSeconds` | `20` | Time budget for the slowest linter per call; a linter past it is reported as `timeout`, not as zero issues |
 | `claudecode.chat.enabled` | `false` | Opt-in to the embedded chat UI (Mode B). When enabled, the chat HTTP server starts on `claudecode.chat.port`. Works with an Anthropic API key (SDK mode) or, without one, through your Claude Code CLI login (OAuth mode). |
 | `claudecode.chat.port` | `5180` | Fixed port for the chat HTTP server. Always open it through the *Open Claude Chat in Browser* command: the URL it hands out carries the private access token the `/ws` and `/cli` WebSockets require. |
 | `claudecode.chat.model` | `claude-sonnet-5` | Default chat model. The picker's options are discovered from your Claude Code install (OAuth) or the Anthropic API (SDK); a curated list is the last resort. Switchable mid-conversation in the UI. |
@@ -253,7 +255,7 @@ The following limitations exist due to Nova's extension API boundaries:
 
 1. **Diff viewer** — Nova does not expose a native diff API like VS Code's `vscode.diff`. Proposed changes are shown by opening a temporary file alongside the original, with an accept/reject notification. Edits the user makes in the proposed-changes tab before clicking *Accept* are preserved (the actual content of the temp file is what gets saved) and signalled back to Claude via `userEdited: true` in the response. A future version may leverage Nova's built-in Git comparison view for side-by-side rendering.
 
-2. **Diagnostics** — Nova does not provide a global API for reading LSP diagnostics from third-party extensions. The `getDiagnostics` tool currently returns an empty list. Full support would require cooperation with language server extensions or a shared `IssueCollection`.
+2. **Diagnostics** — Nova does not provide a global API for reading LSP diagnostics from third-party extensions, so `getDiagnostics` cannot mirror what the editor shows. Instead the bridge runs the project's own linters (TypeScript, ESLint, Ruff — detected from their config files, binaries resolved from `node_modules/.bin`, the project venv, then `PATH`) and returns their findings. Consequences: languages without one of those linters get an empty list; a full `tsc` pass on a large project can take several seconds (results are cached briefly, the budget is `claudecode.diagnostics.timeoutSeconds`); and the answer reflects the files on disk, not unsaved editor buffers. Turn it off with `claudecode.diagnostics.enabled`.
 
 3. **No native WebSocket server** — Nova's JavaScript runtime does not include `WebSocket` server or raw TCP socket APIs. The workaround is a Node.js subprocess, which adds a dependency but works reliably.
 
@@ -290,6 +292,7 @@ claudecode-nova.novaextension/
 │   ├── hooks.js                # Claude Code hook events → live session state, install/uninstall
 │   ├── hook-relay.sh           # Async hook command: finds the bridge via the lock file, POSTs /hook
 │   ├── ws-server.js            # MCP bridge (WebSocket server, Node subprocess) + POST /hook
+│   ├── diagnostics.js          # getDiagnostics fallback — runs tsc / eslint / ruff, maps to protocol shape
 │   ├── chat-session.mjs        # Chat backend (/ws) — Agent SDK streaming-input session (API key or OAuth)
 │   ├── cli-session.mjs         # CLI panel backend (/cli) — node-pty PTY bridge
 │   ├── chat-tool-wrappers.mjs  # In-process MCP tools exposed to the chat SDK

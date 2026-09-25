@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`getDiagnostics` returns real diagnostics.** Claude Code calls this tool
+  after nearly every edit — the VS Code and JetBrains plugins feed it
+  TypeScript and ESLint errors — but Nova exposes no API for another
+  extension's diagnostics, so it always got an empty list and never saw its
+  own mistakes. The bridge now answers the tool itself (`Scripts/diagnostics.js`,
+  inside `ws-server.js`) by running the linters the project already has:
+  TypeScript (`tsconfig.json` + `tsc --noEmit`), ESLint (`eslint.config.*` /
+  `.eslintrc*`, JSON formatter) and Ruff (`pyproject.toml` / `ruff.toml`).
+  Binaries resolve from `node_modules/.bin`, the project venv, then `PATH`;
+  runners execute in parallel under one time budget
+  (`claudecode.diagnostics.timeoutSeconds`, default 20 s) and whatever misses
+  it is reported as `timeout`, never as zero issues. Output follows the
+  protocol shape (0-based ranges, `Error` / `Warning`, `source`, rule code)
+  with a second text block summarising each linter's status, so "no linter
+  configured" never reads as "no errors". An optional `uri` scopes the result
+  to one file. Results are cached for a few seconds and concurrent calls
+  share one run. Calls still appear in the sidebar's Tool Calls log.
+  `claudecode.diagnostics.enabled` turns it off (empty list, as before).
+
 ## 0.29.1 — 2026-09-25
 
 ### Added
