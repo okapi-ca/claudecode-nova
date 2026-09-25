@@ -76,6 +76,14 @@
       {
         "title": "Check for Claude Code Updates",
         "command": "claudecode.checkForUpdates"
+      },
+      {
+        "title": "Install Claude Code Hooks (session status)",
+        "command": "claudecode.installHooks"
+      },
+      {
+        "title": "Remove Claude Code Hooks",
+        "command": "claudecode.uninstallHooks"
       }
     ]
   },
@@ -250,6 +258,20 @@
       ],
       "default": "stable",
       "description": "Which npm dist-tag to compare against. \"next\" surfaces pre-release versions."
+    },
+    {
+      "key": "claudecode.hooks.notifyWaiting",
+      "title": "Notify when Claude is waiting for you",
+      "type": "boolean",
+      "default": true,
+      "description": "Requires the Claude Code hooks (\"Install Claude Code Hooks\" command). Shows a Nova notification when a Claude session blocks on a permission prompt or a question — handy when the terminal is hidden. Sessions driven from the chat panel are excluded (the chat already shows permission cards)."
+    },
+    {
+      "key": "claudecode.hooks.notifyOnStop",
+      "title": "Notify when Claude finishes a turn",
+      "type": "boolean",
+      "default": false,
+      "description": "Requires the Claude Code hooks. Shows a notification with the first line of Claude's reply each time a session finishes responding."
     },
     {
       "key": "claudecode.chat.enabled",

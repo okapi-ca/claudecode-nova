@@ -624,6 +624,10 @@ export async function init(opts) {
   // updates when MCP clients connect/disconnect on the parallel
   // WebSocket. Added on `connection`, removed on `close`.
   const chatClients = new Set();
+  // Claude session ids currently driven by a connected chat client. The
+  // bridge consults this (ownsSession) to tag hook events that originate
+  // from the chat panel, so Nova skips notifications the chat already shows.
+  const chatSessionIds = new Map();   // socket → session id
 
   // The last resume request received from the Nova sidebar that
   // hasn't been picked up by any client yet. If the user clicks
@@ -701,7 +705,7 @@ export async function init(opts) {
         resume: currentSessionId,
         send,
         getModel: () => model,
-        onSessionId: (id) => { currentSessionId = id; },
+        onSessionId: (id) => { currentSessionId = id; chatSessionIds.set(socket, id); },
         onClosed: () => { if (session === s) session = null; },
       });
       session = s;
@@ -746,6 +750,7 @@ export async function init(opts) {
         if (currentSessionId) log("info", `chat: clearing session ${currentSessionId}`);
         dropSession();
         currentSessionId = null;
+        chatSessionIds.delete(socket);
         send({ type: "session_cleared" });
         return;
       }
@@ -793,6 +798,7 @@ export async function init(opts) {
         // the user has visual continuity before their next prompt.
         dropSession();
         currentSessionId = msg.sessionId;
+        chatSessionIds.set(socket, msg.sessionId);
         log("info", `chat: resuming session ${msg.sessionId}`);
 
         send({ type: "history_begin", sessionId: msg.sessionId });
@@ -863,6 +869,7 @@ export async function init(opts) {
     socket.on("close", () => {
       dropSession();
       chatClients.delete(socket);
+      chatSessionIds.delete(socket);
       log("info", "chat: ws client disconnected");
     });
 
@@ -906,6 +913,14 @@ export async function init(opts) {
   return {
     port,
     httpServer, // exposed so cli-session can attach a sibling /cli WSS
+    // True when a connected chat client is driving this Claude session id.
+    // ws-server uses it to tag hook events that originate from the chat
+    // panel so Nova does not double-notify what the chat UI already shows.
+    ownsSession(sessionId) {
+      if (!sessionId) return false;
+      for (const id of chatSessionIds.values()) if (id === sessionId) return true;
+      return false;
+    },
     // Broadcaster called by ws-server.js when MCP clients connect or
     // disconnect, so the chat UI's statusbar reflects live state.
     pushBridgeStatus(info) {

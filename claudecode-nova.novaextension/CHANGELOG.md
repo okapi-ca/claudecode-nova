@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Live session status from Claude Code hooks (opt-in).** The MCP bridge
+  only ever saw the one session connected to it. A new one-way channel,
+  modelled on iTerm2's Claude Code integration, feeds every session's state
+  into Nova: "Install Claude Code Hooks" registers `Scripts/hook-relay.sh`
+  as an `async` command hook on nine events in `~/.claude/settings.json`
+  (backed up once). The relay finds the bridge through the
+  `~/.claude/ide/<port>.lock` files, matches the event's `cwd` to the
+  workspace, and POSTs the event to the bridge's new authenticated
+  `/hook` endpoint. Recent Sessions now floats live sessions to the top with
+  🟢 working (plus the tool in flight), 🟠 waiting for you, ⚪ idle or
+  🔴 failed, and shows the last reply in the tooltip — including sessions
+  started in a terminal, outside the bridge. Claude's edits and turn results
+  land in Activity. Notifications fire when a session blocks on a permission
+  prompt (`claudecode.hooks.notifyWaiting`, default on) or finishes a turn
+  (`claudecode.hooks.notifyOnStop`, default off); the chat panel's own
+  session is excluded since the chat UI already shows those. Offered once
+  after activation; "Remove Claude Code Hooks" takes only our entries out.
+
 ## 0.28.0 — 2026-09-24
 
 ### Fixed

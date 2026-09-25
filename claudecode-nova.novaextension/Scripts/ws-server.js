@@ -677,6 +677,59 @@ function handleNovaMessage(msg) {
 // ---------------------------------------------------------------------------
 // WebSocket upgrade & HTTP server
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Claude Code hook relay — POST /hook
+// ---------------------------------------------------------------------------
+// hook-relay.sh (installed into ~/.claude/settings.json by the extension)
+// forwards Claude Code hook events here: SessionStart, UserPromptSubmit,
+// PreToolUse, PostToolUse, PermissionRequest, Notification, Stop,
+// StopFailure, SessionEnd. Same auth token as the MCP WebSocket (it is in
+// the lock file the relay reads), localhost only. We do not interpret the
+// event — main.js owns the per-session state machine — we just forward it,
+// tagged with whether it came from the chat panel's own Claude session so
+// Nova can skip notifications the chat UI already surfaces.
+const HOOK_BODY_MAX = 1024 * 1024;
+
+function isLocalAddress(addr) {
+  return addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
+}
+
+function handleHookRequest(req, res) {
+  if (!isLocalAddress(req.socket.remoteAddress)) {
+    res.writeHead(403); res.end(); return;
+  }
+  const auth = req.headers["authorization"] || "";
+  if (auth !== `Bearer ${authToken}`) {
+    log("warn", "Rejected /hook: invalid auth token");
+    res.writeHead(401); res.end(); return;
+  }
+  let body = "";
+  let tooLarge = false;
+  req.setEncoding("utf8");
+  req.on("data", (chunk) => {
+    if (tooLarge) return;
+    body += chunk;
+    if (body.length > HOOK_BODY_MAX) { tooLarge = true; body = ""; }
+  });
+  req.on("end", () => {
+    if (tooLarge) { res.writeHead(413); res.end(); return; }
+    let event;
+    try { event = JSON.parse(body); }
+    catch (_) { res.writeHead(400); res.end(); return; }
+    if (!event || typeof event !== "object" || typeof event.hook_event_name !== "string") {
+      res.writeHead(400); res.end(); return;
+    }
+    let fromChat = false;
+    try {
+      fromChat = !!(chatHandle && typeof chatHandle.ownsSession === "function"
+        && chatHandle.ownsSession(event.session_id));
+    } catch (_) { /* never let a chat-side hiccup drop a hook event */ }
+    sendToNova({ type: "hook_event", event, fromChat });
+    res.writeHead(204); res.end();
+  });
+  req.on("error", () => { try { res.writeHead(400); res.end(); } catch (_) {} });
+}
+
 let serverPort = null;
 let lockFilePath = null;
 let authToken = null;
@@ -688,6 +741,10 @@ async function startServer() {
   serverPort = port;
 
   const httpServer = http.createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/hook") {
+      handleHookRequest(req, res);
+      return;
+    }
     res.writeHead(404);
     res.end();
   });

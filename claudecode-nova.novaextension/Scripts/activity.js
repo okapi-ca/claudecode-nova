@@ -121,6 +121,9 @@ function formatActivityLabel(e) {
     case "diff_proposed":  return "⚠️  Diff proposed: " + basename + (e.stats ? " (" + formatStats(e.stats) + ")" : "");
     case "diff_accepted":  return "✓  Accepted diff: " + basename + (e.userEdited ? " (with your edits)" : "");
     case "diff_rejected":  return "✗  Rejected diff: " + basename;
+    case "claude_edited":  return "🤖  Claude edited " + basename;
+    case "claude_stopped": return "🤖  Claude finished" + (e.snippet ? ": " + e.snippet : "");
+    case "claude_failed":  return "🔴  Claude turn failed" + (e.errorType ? " (" + e.errorType + ")" : "");
     default:               return e.type + (basename !== "?" ? " · " + basename : "");
   }
 }

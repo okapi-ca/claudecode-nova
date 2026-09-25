@@ -294,6 +294,10 @@ function handleServerMessage(msg) {
       );
       break;
 
+    case "hook_event":
+      R.Hooks.handleHookEvent(msg.event, !!msg.fromChat);
+      break;
+
     case "chat_failed":
       console.error("Claude Code Bridge: chat server failed — " + msg.message);
       S.chatState.state = "failed";

@@ -113,4 +113,16 @@ S.sessionsWatcher = null;
 // JSONL events in quick succession.
 S.sessionsRefreshTimer = null;
 
+// Live Claude Code sessions reported through the hook relay (hooks.js).
+// Keyed by session_id → { sessionId, cwd, state, tool, lastMessage,
+// lastError, model, permissionMode, startedAt, updatedAt, fromChat }.
+// state ∈ working | waiting | idle | error. Sessions disappear on SessionEnd.
+S.claudeSessions = {};
+
+S.claudeSessionsRefreshTimer = null;
+
+// Cached answer to "are our hooks installed in ~/.claude/settings.json?"
+// — null until hooks.js has looked. Drives the one-time install offer.
+S.hooksInstalled = null;
+
 module.exports = S;

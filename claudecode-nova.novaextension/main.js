@@ -24,6 +24,7 @@ require("./Scripts/chat.js");
 require("./Scripts/bridge.js");
 require("./Scripts/launch.js");
 require("./Scripts/updates.js");
+require("./Scripts/hooks.js");
 
 exports.activate = function() {
   console.log("Claude Code Bridge: activate() called");
@@ -50,6 +51,8 @@ exports.activate = function() {
       nova.commands.register("claudecode.openChat", R.Chat.openChatHandler),
       nova.commands.register("claudecode.setChatApiKey", R.Chat.setChatApiKeyHandler),
       nova.commands.register("claudecode.clearChatApiKey", R.Chat.clearChatApiKeyHandler),
+      nova.commands.register("claudecode.installHooks", R.Hooks.installHooksHandler),
+      nova.commands.register("claudecode.uninstallHooks", R.Hooks.uninstallHooksHandler),
     );
     console.log("Claude Code Bridge: commands registered");
   } catch (err) {
@@ -79,6 +82,10 @@ exports.activate = function() {
 
   // Fire-and-forget: never block activate() on a network round-trip.
   R.Updates.maybeAutoCheckUpdates();
+
+  // One-time offer to wire Claude Code's hooks into the bridge (session
+  // status in the sidebar). Delayed so it lands after the "Ready" toast.
+  setTimeout(function() { R.Hooks.maybeOfferInstall(); }, 4000);
 
   console.log("Claude Code Bridge: activation complete");
 };

@@ -29,6 +29,7 @@ The Nova extension (`main.js`) spawns a Node.js subprocess (`ws-server.js`) that
 - **One-click launch** — Open Claude Code in iTerm or Terminal.app with the IDE-bridge env vars pre-set; the bridge connects automatically
 - **Opt-in embedded chat + terminal** — In-window chat on a persistent Claude Code session (Anthropic API key, or your Claude Code login) with permission prompts, interrupt and image attachments, plus a real PTY-backed terminal panel, both on a single localhost HTTP server
 - **24 slash commands** — Code-on-selection (`/explain`, `/refactor`, `/test`, `/doc`, `/fix`, `/review`, `/optimize`, `/simplify`, `/types`, `/security`, `/rename`), git-driven (`/commit`, `/changelog`, `/pr`), workspace (`/explain-error`, `/why`, `/search`, `/find`), conversation (`/plan`, `/recap`, `/clear`), documentation (`/spec`, `/readme`, `/api-doc`)
+- **Live session status via Claude Code hooks** — Opt-in: the extension installs async hooks into `~/.claude/settings.json` that relay Claude Code's session events to the bridge. Recent Sessions then shows every running session as 🟢 working (with the tool in flight), 🟠 waiting for you, ⚪ idle or 🔴 failed — including sessions started in a terminal, outside the bridge. Optional notifications when Claude blocks on a permission prompt or finishes a turn
 - **Resume any session** — Click an entry in the Recent Sessions sidebar (or the chat's "Resume…" menu) to replay + continue any prior conversation from `~/.claude/projects/<workspace>/*.jsonl`
 - **Secure by default** — Localhost-only servers; the MCP bridge, the chat and the embedded terminal each require a secret token, and the chat/terminal WebSockets also refuse foreign `Origin`/`Host` headers. No data leaves the machine
 
@@ -184,7 +185,7 @@ The Claude Code sidebar exposes six sections:
 - **Status** — connection state, port, client count. Header buttons start/stop the bridge.
 - **Pending Diffs** — every diff Claude proposes is queued here with file name + age. Double-click *Accept* or *Reject* to resolve. Notifications still appear for the first diff (so it gets your attention); the sidebar handles multi-diff overflow. Double-click the parent item to see details with Open / Accept / Reject buttons.
 - **Activity** — visible-effect events (file opens/saves, selections sent, diff outcomes). Click an item to open the corresponding file (file ops) or see a details dialog (diff ops). The collapsible *Tool Calls* group at the bottom shows the raw MCP traffic for debugging — including the bookkeeping calls Claude makes constantly (`getCurrentSelection`, `getOpenEditors`, …).
-- **Recent Sessions** — per-workspace Claude Code sessions parsed from `~/.claude/projects/<encoded-cwd>/*.jsonl`. Click an entry to choose where to resume: web chat (full transcript replay) · CLI panel · external Terminal · copy `claude --resume <id>` to clipboard.
+- **Recent Sessions** — per-workspace Claude Code sessions parsed from `~/.claude/projects/<encoded-cwd>/*.jsonl`. With the Claude Code hooks installed, live sessions float to the top with a state glyph (🟢 working · 🟠 waiting for you · ⚪ idle · 🔴 failed), the tool currently running, and the last reply in the tooltip. Click an entry to choose where to resume: web chat (full transcript replay) · CLI panel · external Terminal · copy `claude --resume <id>` to clipboard.
 - **Claude Code Version** — current CLI version + latest published on the configured channel (stable / next). Auto-checks daily (throttled).
 - **Chat UI Status** — lifecycle state of the chat server (`disabled` / `no_key` / `starting` / `running` / `failed` / `stopped`) including port, model, and key source. Header button opens the chat in your browser or Nova's Preview tab.
 
@@ -208,6 +209,8 @@ Access these from **Extensions → Claude Code Bridge** or the Command Palette:
 | Clear Claude Chat API Key (Keychain) | Remove the stored key |
 | Rotate Claude Chat Access Token | Mint a new secret for the chat / terminal WebSockets and restart the bridge (reopen chat tabs afterwards) |
 | Check for Claude Code Updates | Force a check of the configured npm dist-tag (stable / next) |
+| Install Claude Code Hooks (session status) | Add async hook entries for 9 session-state events to `~/.claude/settings.json` (backed up once as `settings.json.claudecode-nova.bak`). Offered once after activation; re-run to repair the path after moving the extension. |
+| Remove Claude Code Hooks | Remove only the entries this extension added; other hooks are left untouched. |
 
 ## Configuration
 
@@ -224,6 +227,8 @@ Access these from **Extensions → Claude Code Bridge** or the Command Palette:
 | `claudecode.terminalApp` | `auto` | Where *Launch Claude Code* opens the CLI: `auto`, `iTerm`, `Terminal`, or `clipboard`. Other terminals (Warp, Ghostty, Hyper) fall back to clipboard automatically. |
 | `claudecode.updateCheck.autoCheck` | `true` | Daily background check of npm for new Claude Code CLI versions |
 | `claudecode.updateCheck.channel` | `stable` | `stable` (npm `latest`) or `next` (npm `@next` pre-releases) |
+| `claudecode.hooks.notifyWaiting` | `true` | With the hooks installed, notify when a session blocks on a permission prompt or a question (chat-panel sessions excluded) |
+| `claudecode.hooks.notifyOnStop` | `false` | With the hooks installed, notify with the first line of the reply when a session finishes a turn |
 | `claudecode.chat.enabled` | `false` | Opt-in to the embedded chat UI (Mode B). When enabled, the chat HTTP server starts on `claudecode.chat.port`. Works with an Anthropic API key (SDK mode) or, without one, through your Claude Code CLI login (OAuth mode). |
 | `claudecode.chat.port` | `5180` | Fixed port for the chat HTTP server. Always open it through the *Open Claude Chat in Browser* command: the URL it hands out carries the private access token the `/ws` and `/cli` WebSockets require. |
 | `claudecode.chat.model` | `claude-sonnet-5` | Default chat model. The picker's options are discovered from your Claude Code install (OAuth) or the Anthropic API (SDK); a curated list is the last resort. Switchable mid-conversation in the UI. |
@@ -280,7 +285,9 @@ claudecode-nova.novaextension/
 │   ├── launch.js               # Launch Claude Code in an external terminal
 │   ├── updates.js              # Claude Code CLI version check + update / install flows
 │   ├── util.js                 # Notifications, sleep, shell quoting
-│   ├── ws-server.js            # MCP bridge (WebSocket server, Node subprocess)
+│   ├── hooks.js                # Claude Code hook events → live session state, install/uninstall
+│   ├── hook-relay.sh           # Async hook command: finds the bridge via the lock file, POSTs /hook
+│   ├── ws-server.js            # MCP bridge (WebSocket server, Node subprocess) + POST /hook
 │   ├── chat-session.mjs        # Chat backend (/ws) — Agent SDK streaming-input session (API key or OAuth)
 │   ├── cli-session.mjs         # CLI panel backend (/cli) — node-pty PTY bridge
 │   ├── chat-tool-wrappers.mjs  # In-process MCP tools exposed to the chat SDK
@@ -308,6 +315,18 @@ claudecode-nova.novaextension/
 7. `ws-server.js` forwards them to `main.js` via stdout JSON lines
 8. `main.js` executes the tool using Nova APIs and sends the result back via stdin
 9. `ws-server.js` wraps the result in MCP format and returns it over WebSocket
+
+### Session status flow (hooks, opt-in)
+
+The MCP bridge only sees the Claude session that is connected to it. Session *state* comes from a second, one-way channel modelled on iTerm2's Claude Code integration, but pointed at the bridge instead of a Python API:
+
+1. "Install Claude Code Hooks" registers `Scripts/hook-relay.sh` as an `async` command hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Notification`, `Stop`, `StopFailure` and `SessionEnd`
+2. Claude Code pipes each event's JSON to the script and moves on (async: never waits, output discarded)
+3. The script reads `~/.claude/ide/*.lock`, keeps the Nova locks whose `workspaceFolders` contain the event's `cwd` and whose `pid` is alive, and POSTs the payload to `http://127.0.0.1:<port>/hook` with the lock's token as `Authorization: Bearer`
+4. `ws-server.js` validates token + localhost, forwards `{type: "hook_event", event, fromChat}` to `main.js`
+5. `hooks.js` runs a per-session state machine (working / waiting / idle / error), updates the Recent Sessions sidebar, logs Claude's edits and turn results to Activity, and raises notifications — except for the chat panel's own session, which already shows them
+
+POSIX `sh` + `sed` + `curl` only, so it works from any shell Claude was launched in (no `node` on PATH required).
 
 ### Lock File Format
 

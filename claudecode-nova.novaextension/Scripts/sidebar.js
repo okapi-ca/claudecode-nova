@@ -158,7 +158,7 @@ function ensureActivitySidebars() {
       S.disposables.push(S.versionTree);
     }
     if (!S.sessionsProvider) {
-      S.sessionsProvider = new SessionsTreeProvider();
+      S.sessionsProvider = new SessionsTreeProvider(function() { return S.claudeSessions; });
       try { S.sessionsProvider.refresh(); }
       catch (e) { console.warn("Claude Code Bridge: initial sessions scan failed:", e.message); }
       S.sessionsTree = new TreeView("claudecode.sidebar.sessions", {
