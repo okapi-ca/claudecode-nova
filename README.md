@@ -89,6 +89,8 @@ Three buttons in the "Open Claude Chat" command's action panel:
 - **Open in Browser** — Safari / Firefox / your default
 - **Copy URL** — drop into any browser tab manually
 
+The URL carries a private access token (`?token=…`), required by the chat and terminal WebSockets since 0.24.0. If you dock the chat through Nova's own **Preview URL** project setting instead (`workspace.preview_url`, stored in the gitignored `.nova/Configuration.json`), point it at the tokenized URL from "Copy URL" — a bare `http://127.0.0.1:5180/` shows "Missing access token". Both the iframe wrapper and that setting are refreshed automatically by the bridge whenever the chat starts with a URL they no longer match (rotated token, port change), so an already-docked panel keeps working.
+
 ## Requirements
 
 | Dependency | Minimum Version |

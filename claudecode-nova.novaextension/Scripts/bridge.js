@@ -288,6 +288,8 @@ function handleServerMessage(msg) {
       S.chatState.url = R.Chat.chatUrlWithToken(S.chatState.port);
       S.chatState.lastError = null;
       R.Sidebar.refreshChatStatusSidebar();
+      R.Chat.refreshChatWrapperIfStale();
+      R.Chat.refreshPreviewUrlIfStale();
       R.Util.showNotification(
         "Chat UI ready",
         "Claude chat is live at " + R.Chat.chatBaseUrl(S.chatState.port) + "\nUse the \"Open Claude Chat in Browser\" command — it opens/copies the URL with the required access token."

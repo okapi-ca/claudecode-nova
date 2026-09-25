@@ -366,6 +366,54 @@ function buildChatWrapperHtml(url) {
   ].join("\n");
 }
 
+// Called when the chat server reports it is up. If the Nova Preview wrapper
+// exists but embeds a different URL than the one we now hand out (token
+// rotated, port changed, or a wrapper generated before the v0.24.0 token
+// gate), rewrite it in place. Nova's Preview tab re-renders on file change,
+// so an open chat panel stuck on "Disconnected — reconnecting…" (401 on the
+// WebSocket) heals without the user re-running "Open Claude Chat". We only
+// touch a wrapper that already exists — never create one unasked.
+function refreshChatWrapperIfStale() {
+  try {
+    const wrapperPath = nova.path.join(nova.extension.globalStoragePath, "chat-frame.html");
+    if (!nova.fs.stat(wrapperPath)) return false;
+    const url = chatUrlWithToken(S.chatState.port);
+    if (isChatWrapperFresh(wrapperPath, url)) return false;
+    const file = nova.fs.open(wrapperPath, "w");
+    file.write(buildChatWrapperHtml(url));
+    file.close();
+    console.log("Claude Code Bridge: refreshed stale chat-frame.html (URL/token changed)");
+    return true;
+  } catch (err) {
+    console.warn("Claude Code Bridge: could not refresh chat wrapper:", err.message);
+    return false;
+  }
+}
+
+// Same idea for the other way people dock the chat in Nova: the project's
+// Preview tab pointed at the chat via Nova's own "Preview URL" setting
+// (workspace.preview_url, stored in the gitignored .nova/Configuration.json).
+// Pre-0.24.0 docs suggested pasting the bare URL there; without ?token= the
+// page now shows "Missing access token". When that setting targets our chat
+// but not the exact URL we hand out, update it in place. We never set it
+// when it points elsewhere or is unset — the Preview tab is the user's.
+function refreshPreviewUrlIfStale() {
+  try {
+    const current = nova.workspace.config.get("workspace.preview_url");
+    if (typeof current !== "string" || !current) return false;
+    const base = chatBaseUrl(S.chatState.port);
+    if (current.indexOf(base) !== 0) return false;          // not our chat
+    const url = chatUrlWithToken(S.chatState.port);
+    if (current === url) return false;                       // already right
+    nova.workspace.config.set("workspace.preview_url", url);
+    console.log("Claude Code Bridge: updated workspace.preview_url with the current chat token");
+    return true;
+  } catch (err) {
+    console.warn("Claude Code Bridge: could not update workspace.preview_url:", err.message);
+    return false;
+  }
+}
+
 // True if the wrapper file exists AND still references `url`. Lets the
 // user customize the HTML freely without us overwriting their edits at
 // every "Open in Nova Preview" click. Returns false when the file is
@@ -407,5 +455,7 @@ R.Chat = Object.assign(R.Chat || {}, {
   openChatInNovaPreview,
   buildChatWrapperHtml,
   isChatWrapperFresh,
+  refreshChatWrapperIfStale,
+  refreshPreviewUrlIfStale,
 });
 module.exports = R.Chat;

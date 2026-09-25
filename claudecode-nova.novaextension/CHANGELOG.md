@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Chat panel stuck on "Disconnected — reconnecting…" after the 0.24.0
+  token gate.** The Nova Preview wrapper (`chat-frame.html` in the
+  extension's storage) was only rewritten when "Open Claude Chat → Open in
+  Nova Preview" was run again. A wrapper generated before 0.24.0 kept
+  iframing the chat URL without `?token=`, so both the chat and the CLI
+  panel got 401 on their WebSockets and the page retried every 1.5 s. The
+  bridge now rewrites an existing wrapper whenever the chat server comes up
+  with a URL the wrapper does not embed (missing token, rotated token, port
+  change); Nova's Preview re-renders on the file change, so an open panel
+  heals itself. The same applies to Nova's project **Preview URL** setting
+  (`workspace.preview_url`): when it targets the chat without the current
+  token — the pre-0.24.0 docs suggested pasting the bare URL there — the
+  bridge updates it in place (the file is gitignored). The page also stops
+  retrying when it has no token at all and keeps the explanatory message
+  instead of flickering.
+
 ## 0.29.0 — 2026-09-25
 
 ### Added

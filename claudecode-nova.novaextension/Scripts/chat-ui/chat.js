@@ -775,6 +775,12 @@ function connect() {
   });
 
   ws.addEventListener("close", () => {
+    if (!AUTH_TOKEN) {
+      // The server answers 401 without a token; retrying every 1.5 s just
+      // flickers the status bar. Stay on the explanatory message instead.
+      setStatus("error", "Missing access token — open the chat from Nova (Open Claude Chat command)");
+      return;
+    }
     setStatus("error", "Disconnected — reconnecting…");
     setTimeout(connect, 1500);
   });
